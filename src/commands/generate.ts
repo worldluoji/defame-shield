@@ -1,13 +1,16 @@
 /**
  * dsh generate <type> --case <id> — 生成文书
+ * dsh generate defense --from-analysis <json>  — 基于拆解结果生成答辩状
  */
-import { writeFileSync, existsSync, mkdirSync } from 'node:fs';
+import { writeFileSync, existsSync, mkdirSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { loadConfig } from '../config/config.js';
 import { loadCase, outputsDir } from '../case/case.js';
 import { generateDocument } from '../generators/generate.js';
+import { generateDefense } from '../generators/defense.js';
 import { out, die } from '../utils/console.js';
 import { DOCUMENT_TYPES, DOCUMENT_TYPE_LABELS, type DocumentType } from '../types.js';
+import type { ComplaintAnalysis } from '../analyzer/complaint-types.js';
 
 export interface GenerateFlags {
   case?: string;
@@ -15,6 +18,8 @@ export interface GenerateFlags {
   provider?: string;
   output?: string;
   extra?: string;
+  /** 拆解结果 JSON 路径 (仅 defense 适用) */
+  fromAnalysis?: string;
 }
 
 export async function generateCommand(type: string, flags: GenerateFlags): Promise<void> {
@@ -24,6 +29,13 @@ export async function generateCommand(type: string, flags: GenerateFlags): Promi
         `支持的: ${DOCUMENT_TYPES.map((t) => `${t} (${DOCUMENT_TYPE_LABELS[t]})`).join(', ')}`,
     );
   }
+
+  // 答辩状的特殊路径: --from-analysis
+  if (type === 'defense' && flags.fromAnalysis) {
+    await generateDefenseFromAnalysis(flags);
+    return;
+  }
+
   if (!flags.case) {
     die('必须指定 --case <id>');
   }
@@ -58,6 +70,46 @@ export async function generateCommand(type: string, flags: GenerateFlags): Promi
 
   writeOutput(outDir, type, c.id, result.content, flags.output);
   out.success(`已生成  (${result.mode === 'ai' ? 'AI 润色' : 'draft 纯模板'},  耗时 ${result.elapsedMs}ms)`);
+  out.dim(`查看: cat ${outDir}`);
+}
+
+async function generateDefenseFromAnalysis(flags: GenerateFlags): Promise<void> {
+  if (!flags.fromAnalysis) die('必须指定 --from-analysis <json>');
+  if (!existsSync(flags.fromAnalysis)) die(`拆解结果文件不存在: ${flags.fromAnalysis}`);
+
+  const analysis = JSON.parse(readFileSync(flags.fromAnalysis, 'utf-8')) as ComplaintAnalysis;
+  // 兼容: case 来自 analysis.parties 或 --case 指定
+  const config = loadConfig();
+  const caseId = flags.case ?? analysis.parties.被告.name.replace(/\s/g, '-').toLowerCase() ?? 'def-default';
+  const c = flags.case ? loadCase(config, flags.case) : null;
+  if (!c) {
+    die(`需要 --case <id> 指定案件以获取被告方信息 (analysis 中的被告信息不完整)`);
+  }
+
+  const outDir = outputsDir(config, c.id);
+  if (!existsSync(outDir)) mkdirSync(outDir, { recursive: true });
+
+  out.info(`生成 民事答辩状  /  案件: ${c.id}  /  基于拆解: ${flags.fromAnalysis}  /  模式: ${flags.draft ? 'draft' : 'AI 润色'}`);
+
+  const result = await generateDefense({
+    analysis,
+    case: c,
+    draft: flags.draft,
+    provider: flags.provider as 'deepseek' | 'minimax' | undefined,
+    extraInstruction: flags.extra,
+  });
+
+  if (!result.ok) {
+    out.error(result.error);
+    if (result.draftFallback) {
+      out.warn('已 fallback 到 draft 模式, 保存到 outputs/');
+      writeOutput(outDir, 'defense', c.id, result.draftFallback, flags.output);
+    }
+    process.exit(1);
+  }
+
+  writeOutput(outDir, 'defense', c.id, result.content, flags.output);
+  out.success(`已生成答辩状  (${result.mode === 'ai' ? 'AI 润色' : 'draft'},  ${result.strategies.length} 个反点,  ${result.caseRefs.length} 条类案参考)`);
   out.dim(`查看: cat ${outDir}`);
 }
 

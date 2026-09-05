@@ -1,6 +1,7 @@
 # 民事名誉诉讼文书生成 CLI
 
-> 4 种律师常用法律文书的本地化生成工具:律师函 / 民事起诉状 / 民事答辩状 / 证据目录
+> **核心场景: 民事名誉权纠纷 - 被告应诉** (拆解原告起诉状 → 5 个反点逐条反驳)
+> 同时支持 4 种律师常用法律文书的本地化生成:律师函 / 民事起诉状 / 民事答辩状 / 证据目录
 > 支持 LLM 增强润色 + 纯模板(draft) 模式,中文 CLI,纯本地部署。
 
 ## 重要法律声明
@@ -21,11 +22,6 @@ cd your-project
 npx defame-shield init   # 或 pnpm dsh init
 ```
 
-`init` 会:
-- 创建 `dsh.config.json` (项目配置)
-- 从 `.env.example` 复制到 `.env.local` (你需要填 API key)
-- 创建 `data/cases/` 案件目录
-
 ### 2. 配置 API key
 
 编辑 `.env.local`:
@@ -37,89 +33,70 @@ DEEPSEEK_API_KEY=sk-你的key
 
 > 不填 key 也能用 `--draft` 纯模板模式, 只是没有 LLM 润色。
 
-### 3. 创建案件
+### 3. 创建案件 (被告视角)
 
 ```bash
-dsh case new sample-001
+dsh case new def-sample-001
 ```
 
-交互式填写:
-- 案件标题
-- 案由 (网络/传统媒体/其他)
-- 原告/被告信息
-- 律师信息(选填)
-- 事实摘要 (侵权时间/方式/内容/后果)
-- 管辖法院(选填)
+### 4. 拆解原告起诉状
 
-### 4. 生成文书
+把起诉状复制成 markdown,保存到 `data/cases/sample-001/complaint.md`,然后:
+
+```bash
+dsh analyze-complaint data/cases/sample-001/complaint.md --case def-sample-001 --draft
+```
+
+输出: `data/cases/def-sample-001/complaint-analysis.json` (拆解结果)
+
+### 5. 生成答辩状 (基于拆解)
+
+```bash
+dsh generate defense --case def-sample-001 \
+  --from-analysis data/cases/def-sample-001/complaint-analysis.json \
+  --draft
+```
+
+输出: `data/cases/def-sample-001/outputs/defense-<时间戳>.md`
+
+**答辩状包含**:
+- ✅ 总体答辩策略 (按杀伤力排序的 3 个反点)
+- ✅ 逐条诉请反驳 (每条匹配最适反点 + 法律依据)
+- ✅ 类案参考 (裁判要点式, 不编案号)
+- ✅ 答辩证据指引 (基于反点, 提示需补充的证据)
+- ✅ 待补充标记 (提示律师补充案件特有事实)
+
+## 4 种文书生成 (基础)
 
 ```bash
 # 律师函
 dsh generate letter --case sample-001
 
-# 民事起诉状
+# 民事起诉状 (原告视角)
 dsh generate complaint --case sample-001
 
-# 民事答辩状
+# 民事答辩状 (被告视角, 走拆解流程效果更好)
 dsh generate defense --case sample-001
 
 # 证据目录
 dsh generate evidence-list --case sample-001
 ```
 
-输出到 `data/cases/sample-001/outputs/<文书>-<时间戳>.md`
+## 5 个核心反点
 
-### 5. 常用选项
+答辩质量的关键,不在于"否认一切",而在于**逐条打掉原告主张的要件**。
 
-```bash
-# 纯模板, 不调 LLM, 快/可预测/可审计
-dsh generate letter --case sample-001 --draft
+民事名誉权侵权四要件: **违法行为 + 主观过错 + 损害后果 + 因果关系**
 
-# 指定 provider
-dsh generate letter --case sample-001 --provider deepseek
+| # | 反点 ID | 反点名称 | 法条 | 适用场景 |
+|---|---|---|---|---|
+| 1 | `fact-true` | 事实基本属实 / 舆论监督免责 | 民法典 1025 | 被告所述有合理来源/已尽核实义务 |
+| 2 | `no-act` | 未实施被诉行为 | 民诉法 67 | 账号非被告/内容非被告发 |
+| 3 | `no-tort-grade` | 未达名誉权侵害程度 | 民法典 1024 | 未指名/不能识别/属合理评论 |
+| 4 | `no-damage` | 无损害后果 | 民法典 1183 | 未举证财产/精神损害 |
+| 5 | `no-causation` | 无因果关系 | 民法典 1024 | 损害系他因/无时间关联 |
 
-# 自定义输出文件名
-dsh generate letter --case sample-001 --output my-letter.md
-
-# 给 LLM 额外指令
-dsh generate complaint --case sample-001 --extra "请重点突出第 3、4 条诉讼请求"
-```
-
-## 4 种文书模板
-
-| 类型 | 命令 | 适用场景 | 关键法条 |
-|---|---|---|---|
-| 律师函 | `letter` | 诉前警告, 督促履行 | 民法典 1024、1025 |
-| 民事起诉状 | `complaint` | 向法院提起名誉权之诉 | 民法典 1024、1183 |
-| 民事答辩状 | `defense` | 作为被告应诉答辩 | 民法典 1025 (核心: 舆论监督免责) |
-| 证据目录 | `evidence-list` | 整理提交证据 | 民诉法 66、证据若干规定 |
-
-## 目录结构
-
-```
-defame-shield/
-├── bin/                  CLI 入口
-├── src/
-│   ├── cli.ts            命令注册 (commander)
-│   ├── commands/         子命令实现
-│   ├── case/             案件数据结构 + CRUD
-│   ├── config/           配置 + env 解析
-│   ├── generators/       文书生成器
-│   ├── llm/              LLM 客户端 (deepseek/minimax)
-│   ├── templates/        Markdown 模板
-│   ├── types.ts          公共类型
-│   └── utils/            工具函数
-├── data/
-│   └── cases/            案件数据 (按 ID 一个目录)
-│       └── <case-id>/
-│           ├── case.json
-│           └── outputs/  生成的文书
-├── docs/                 文档
-├── __tests__/            单元测试
-├── .env.example
-├── dsh.config.json       (init 时生成)
-└── package.json
-```
+工具会根据起诉状拆解结果,自动选 1-3 个最适反点,并为每条诉请匹配最适反点。
 
 ## 命令一览
 
@@ -130,7 +107,39 @@ dsh config set <key> <value>                        修改配置
 dsh case new <id>                                   创建案件
 dsh case list                                       列出案件
 dsh case show <id>                                  查看案件详情
-dsh generate <type> --case <id> [--draft]           生成文书
+dsh analyze-complaint <file> --case <id> [--draft]  拆解起诉状 → JSON
+dsh generate <type> --case <id> [--draft]          生成文书
+  └─ defense: --from-analysis <json> 必填
+```
+
+## 目录结构
+
+```
+defame-shield/
+├── bin/                  CLI 入口
+├── src/
+│   ├── cli.ts            commander 命令注册
+│   ├── commands/         子命令: init/config/case/analyze/generate
+│   ├── analyzer/         起诉状拆解器 (LLM + draft)
+│   ├── rebuttal/         5 个反点策略库 + 选择器
+│   ├── generators/       文书生成器 (含基于拆解的答辩 v2)
+│   ├── case/             案件数据结构 + CRUD
+│   ├── config/           dsh.config.json + .env 解析
+│   ├── llm/              LLM 客户端 (deepseek/minimax)
+│   ├── templates/        4 个 Markdown 模板
+│   └── utils/            工具函数
+├── data/
+│   └── cases/
+│       └── <case-id>/
+│           ├── case.json
+│           ├── complaint.md          (原告起诉状 markdown, 被告视角时存)
+│           ├── complaint-analysis.json (拆解结果)
+│           └── outputs/              生成的文书
+├── docs/                 法律免责声明 + todo (方向 1/4/5)
+├── __tests__/            41 个单元测试
+├── .env.example
+├── dsh.config.json       (init 时生成)
+└── package.json
 ```
 
 ## LLM Provider
@@ -143,14 +152,14 @@ dsh generate <type> --case <id> [--draft]           生成文书
 ## 调试
 
 ```bash
-# 单元测试
+# 单元测试 (41 个, < 1s)
 pnpm test
 
 # 类型检查
 pnpm typecheck
 
-# 直接用 tsx 跑 (开发时)
-pnpm dev -- generate letter --case sample-001 --draft
+# 直接用 tsx 跑
+pnpm dev -- generate defense --case def-sample-001 --draft
 ```
 
 ## License

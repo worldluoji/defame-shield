@@ -21,6 +21,7 @@ import { initCommand } from './commands/init.js';
 import { configShowCommand, configSetCommand } from './commands/config.js';
 import { caseNewCommand, caseListCommand, caseShowCommand } from './commands/case.js';
 import { generateCommand } from './commands/generate.js';
+import { analyzeComplaintCommand } from './commands/analyze.js';
 import { out } from './utils/console.js';
 
 loadEnvFile();
@@ -54,6 +55,16 @@ caseCmd
   .description('显示案件详情 (case.json)')
   .action((id: string) => caseShowCommand(id));
 
+const analyzeCmd = program.command('analyze-complaint <file>').description('拆解原告起诉状 → JSON');
+analyzeCmd
+  .option('--draft', '纯模板 (关键词抽取), 不调 LLM', false)
+  .option('--provider <provider>', 'LLM provider (deepseek/minimax)')
+  .option('--case <id>', '关联到本地案件 (输出到 data/cases/<id>/complaint-analysis.json)')
+  .option('--out <path>', '自定义输出路径')
+  .option('--silent', '静默模式, 不输出 JSON 内容', false)
+  .option('--extra <text>', '给 LLM 的额外指令')
+  .action(analyzeComplaintCommand);
+
 const genCmd = program.command('generate <type>').description('生成文书');
 genCmd
   .requiredOption('--case <id>', '案件 ID')
@@ -61,6 +72,7 @@ genCmd
   .option('--provider <provider>', 'LLM provider (deepseek/minimax)')
   .option('--output <filename>', '自定义输出文件名')
   .option('--extra <text>', '给 LLM 的额外指令')
+  .option('--from-analysis <path>', '[仅 defense] 从拆解结果 JSON 生成答辩状')
   .action(generateCommand);
 
 program.parseAsync(process.argv).catch((err) => {

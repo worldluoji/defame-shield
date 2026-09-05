@@ -1,0 +1,71 @@
+{
+  "source": "data/cases/sample-001/complaint.md",
+  "analyzedAt": "2026-09-05T14:58:49.318Z",
+  "mode": "draft",
+  "parties": {
+    "原告": {
+      "name": "王女士",
+      "role": "原告"
+    },
+    "被告": {
+      "name": "赵某",
+      "role": "被告"
+    }
+  },
+  "cause": "网络侵权名誉权",
+  "claims": [
+    {
+      "index": 1,
+      "content": "依法判令被告立即停止对原告名誉权的侵害（即删除/屏蔽所有侵权微博及转发内容）；",
+      "type": "stop_infringement"
+    },
+    {
+      "index": 2,
+      "content": "依法判令被告在新浪微博平台公开向原告赔礼道歉、消除影响、恢复名誉（道歉内容须经原告审核，保留时间不少于 90 日）；",
+      "type": "restore_reputation"
+    },
+    {
+      "index": 3,
+      "content": "依法判令被告赔偿原告因维权所支出的合理费用（包括但不限于公证费、律师费、差旅费、误工费等）合计人民币 30000 元；",
+      "type": "compensate_loss",
+      "amount": 30000
+    },
+    {
+      "index": 4,
+      "content": "依法判令被告赔偿原告精神损害抚慰金人民币 50000 元；",
+      "type": "spiritual_compensation",
+      "amount": 50000
+    },
+    {
+      "index": 5,
+      "content": "依法判令被告承担本案全部诉讼费、公告费等诉讼费用。",
+      "type": "litigation_cost"
+    }
+  ],
+  "facts": {
+    "tortMethod": "微博",
+    "tortContent": "王女士是个彻头彻尾的骗子，骗了大家几千万\"、\"王女士生活作风极差，是行业内公开的秘密\"、\"王女士的学历都是造假的\"等",
+    "spread": "粉丝 80"
+  },
+  "evidence": [],
+  "legalBasis": [
+    "《中华人民共和国民法典》第一千零二十四条",
+    "《中华人民共和国民法典》第一千零二十五条",
+    "最高人民法院关于审理名誉权案件若干问题的解答"
+  ],
+  "elementScore": {
+    "factAuthenticity": "disputed",
+    "directedness": "medium",
+    "fault": "unknown",
+    "damage": "weak"
+  },
+  "rebuttalPriority": [
+    1,
+    2,
+    3,
+    4,
+    5
+  ],
+  "confidence": 0.3,
+  "warnings": []
+}
