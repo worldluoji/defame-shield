@@ -1,0 +1,46 @@
+{
+  "name": "defame-shield",
+  "version": "0.1.0",
+  "description": "民事名誉诉讼文书生成 CLI 工具 (律师函/起诉状/答辩状/证据目录)",
+  "type": "module",
+  "bin": {
+    "dsh": "./bin/dsh.mjs"
+  },
+  "main": "./bin/dsh.mjs",
+  "scripts": {
+    "start": "node bin/dsh.mjs",
+    "dev": "tsx bin/dsh.mjs",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "typecheck": "tsc --noEmit",
+    "lint": "eslint src/ bin/",
+    "build": "tsc -p tsconfig.build.json"
+  },
+  "keywords": [
+    "defamation",
+    "名誉权",
+    "诉讼",
+    "律师函",
+    "起诉状",
+    "cli"
+  ],
+  "license": "MIT",
+  "engines": {
+    "node": ">=18.17"
+  },
+  "dependencies": {
+    "commander": "^12.1.0",
+    "inquirer": "^9.3.7",
+    "chalk": "^5.3.0"
+  },
+  "devDependencies": {
+    "@types/inquirer": "^9.0.7",
+    "@types/node": "^20.14.0",
+    "@typescript-eslint/eslint-plugin": "^7.18.0",
+    "@typescript-eslint/parser": "^7.18.0",
+    "eslint": "^8.57.0",
+    "tsx": "^4.16.0",
+    "typescript": "^5.5.0",
+    "vitest": "^2.0.0"
+  }
+}

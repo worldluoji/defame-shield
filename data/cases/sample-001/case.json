@@ -1,0 +1,42 @@
+{
+  "id": "sample-001",
+  "title": "网络博主侮辱诽谤案 (示例)",
+  "cause": "网络侵权名誉权",
+  "plaintiff": {
+    "name": "张三",
+    "role": "原告",
+    "idNumber": "110101199001011234",
+    "address": "北京市东城区某某路 1 号",
+    "contact": "13800138000"
+  },
+  "defendant": {
+    "name": "李四",
+    "role": "被告",
+    "idNumber": "310101199002022345",
+    "address": "上海市黄浦区某某路 100 号",
+    "contact": "13900139000"
+  },
+  "lawyer": {
+    "name": "王律师",
+    "role": "律师",
+    "contact": "010-12345678"
+  },
+  "facts": "2025 年 5 月 1 日至 2025 年 6 月 1 日期间，被告李四通过其微博账号 @李四微博 (粉丝 50 万)，连续发布 10 余条针对原告张三的侮辱性、诽谤性言论。其中内容为'张三是个彻头彻尾的骗子，骗了大家几千万'、'张三生活作风极差，是行业内公开的秘密'等。上述言论经大量转发评论，严重损害了原告的社会评价，导致原告所在公司与其解约，原告出现严重精神抑郁症状。被告所述内容均无事实依据，纯属捏造。",
+  "claims": [
+    { "content": "依法判令被告立即停止对原告名誉权的侵害 (删除所有侵权微博)" },
+    { "content": "依法判令被告在微博平台公开向原告赔礼道歉、消除影响、恢复名誉 (保留 90 日)" },
+    { "content": "依法判令被告赔偿原告因维权所支出的合理费用 (公证费、律师费、差旅费等) 合计人民币 30000 元" },
+    { "content": "依法判令被告赔偿原告精神损害抚慰金人民币 50000 元" },
+    { "content": "依法判令被告承担本案全部诉讼费、公告费等诉讼费用" }
+  ],
+  "evidence": [
+    { "index": 1, "name": "侵权微博截图 (含元数据)", "kind": "电子数据", "purpose": "证明被告实施了侵权行为及具体内容", "source": "微博平台", "acquiredAt": "2025-06-02", "filePath": "evidence/weibo-screenshots.pdf" },
+    { "index": 2, "name": "微博内容公证书", "kind": "书证", "purpose": "证明侵权内容的真实性", "source": "北京市方圆公证处", "acquiredAt": "2025-06-05", "filePath": "evidence/notary-certificate.pdf" },
+    { "index": 3, "name": "公司解约通知", "kind": "书证", "purpose": "证明侵权行为给原告造成了实际财产损失", "source": "某某科技有限公司", "acquiredAt": "2025-06-10", "filePath": "evidence/termination-notice.pdf" },
+    { "index": 4, "name": "医院诊断证明", "kind": "书证", "purpose": "证明侵权行为给原告造成了精神损害", "source": "北京安定医院", "acquiredAt": "2025-06-15", "filePath": "evidence/medical-diagnosis.pdf" },
+    { "index": 5, "name": "侵权微博传播数据 (转发评论数)", "kind": "电子数据", "purpose": "证明侵权内容的传播范围和影响程度", "source": "微博数据中心", "acquiredAt": "2025-06-20", "filePath": "evidence/spread-data.csv" }
+  ],
+  "court": "北京市东城区人民法院",
+  "createdAt": "2025-06-25T10:00:00.000Z",
+  "updatedAt": "2025-06-25T10:00:00.000Z"
+}
