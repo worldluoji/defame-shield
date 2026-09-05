@@ -95,6 +95,152 @@ export async function selfCheckDefense(opts: SelfCheckOptions): Promise<SelfChec
 }
 
 /**
+ * 修补建议自动注入 — 根据漏洞列表生成可粘贴的修补段落
+ *
+ * 三种注入策略:
+ *   1. 程序性反点 (missing-statute-limitations / -jurisdiction / -wrong-party):
+ *      → 在答辩状开头插入"程序性抗辩"段 (含模板+占位符)
+ *   2. 实体反点 (no-tort-grade / no-damage / fact-true 等):
+ *      → 在每条诉请前补一段反点模板
+ *   3. 占位符未填 (unfilled-placeholders):
+ *      → 列出所有占位符, 引导人工填
+ *   4. 诉请未回应 (claim-X-no-response):
+ *      → 在该诉请位置插入模板
+ *   5. 证据指引缺失 / 类案参考缺失:
+ *      → 提示"建议在文末补充" (不直接插入, 避免过长)
+ */
+export interface ApplyFixesResult {
+  ok: true;
+  /** 修补后的答辩状 (含所有注入内容) */
+  patched: string;
+  /** 注入的修补段落数 */
+  injectedCount: number;
+  /** 修补摘要 */
+  summary: string;
+}
+
+export function applyFixes(
+  defense: string,
+  vulns: Vulnerability[],
+  analysis: ComplaintAnalysis,
+  caseContext: { caseName: string; defendantName: string },
+): ApplyFixesResult {
+  let patched = defense;
+  let injected = 0;
+  const notes: string[] = [];
+
+  for (const v of vulns) {
+    if (v.risk === 'low') continue; // 低风险不注入
+
+    if (v.id === 'missing-statute-limitations' ||
+        v.id === 'missing-jurisdiction' ||
+        v.id === 'missing-wrong-party') {
+      // 注入程序性抗辩段
+      const strategy = STRATEGIES[v.strategyId];
+      const section = renderProceduralDefense(strategy, caseContext);
+      patched = injectAfter(patched, '## 总体答辩策略', section);
+      injected++;
+      notes.push(`注入程序性反点: ${strategy.name}`);
+    } else if (v.id.startsWith('unfilled-placeholders')) {
+      // 注入"待补充占位符清单"段
+      const section = renderPlaceholderNotice(v);
+      patched = injectAfter(patched, '## ⚠️ 重要提示', section, true);
+      injected++;
+      notes.push(`注入占位符提醒: ${v.attack.slice(0, 50)}`);
+    } else if (v.id.startsWith('claim-') && v.id.endsWith('-no-response')) {
+      // 注入单条诉请反驳
+      const claimIndex = v.claimIndex;
+      if (claimIndex) {
+        const section = renderClaimResponse(claimIndex, v, analysis);
+        patched = injectAfter(patched, `### 诉请 ${claimIndex}：`, section);
+        injected++;
+        notes.push(`注入诉请 ${claimIndex} 反驳`);
+      }
+    } else if (v.id === 'no-evidence-guidance' || v.id === 'no-case-references') {
+      // 提示性提醒, 不直接注入
+      notes.push(`[提示] ${v.attack}: ${v.suggestedFix}`);
+    } else if (v.id === 'fact-true-no-verification' || v.id === 'no-damage-weak-against-strong') {
+      // 注入强化证据指引
+      const section = renderEvidenceReinforcement(v);
+      patched = injectAfter(patched, '## 答辩证据指引', section, true);
+      injected++;
+      notes.push(`强化证据指引: ${v.id}`);
+    }
+  }
+
+  return {
+    ok: true,
+    patched,
+    injectedCount: injected,
+    summary: notes.length > 0 ? notes.join('\n') : '无需修补',
+  };
+}
+
+function injectAfter(text: string, anchor: string, section: string, before = false): string {
+  const idx = text.indexOf(anchor);
+  if (idx < 0) {
+    // 锚点不存在, 追加到末尾
+    return text + '\n\n' + section;
+  }
+  if (before) {
+    return text.slice(0, idx) + section + '\n\n' + text.slice(idx);
+  }
+  // 找到锚点所在行的末尾
+  const lineEnd = text.indexOf('\n', idx);
+  if (lineEnd < 0) return text + '\n\n' + section;
+  return text.slice(0, lineEnd + 1) + section + '\n\n' + text.slice(lineEnd + 1);
+}
+
+function renderProceduralDefense(strategy: RebuttalStrategy, ctx: { caseName: string; defendantName: string }): string {
+  return `### ${strategy.name}（程序性抗辩）
+
+> **由抗辩自检器自动注入** — 本节为程序性反点, 优先于实体反点.
+
+${strategy.template}
+
+**适用说明**: 本节为程序性抗辩, 一旦成立可**直接驳回**原告全部诉请. ${ctx.defendantName} 在此明确提出${strategy.name}, 提请受案法院依法审查.
+`;
+}
+
+function renderPlaceholderNotice(v: Vulnerability): string {
+  return `### 📌 待补充占位符清单
+
+> **由抗辩自检器自动注入** — 答辩状含未填的 [xxx] 占位符, 必须人工补充.
+
+${v.suggestedFix}
+
+**快速定位**: 在答辩状编辑器中搜索 \`[\` 即可找到所有占位符.
+`;
+}
+
+function renderClaimResponse(claimIndex: number, v: Vulnerability, analysis: ComplaintAnalysis): string {
+  const claim = analysis.claims.find((c) => c.index === claimIndex);
+  if (!claim) return '';
+  return `#### 补充反驳 (诉请 ${claimIndex}: ${claim.content.slice(0, 40)}...)
+
+> **由抗辩自检器自动注入** — 此项诉请在初稿中未做实质性回应.
+
+${v.suggestedFix}
+
+**理由**: ${v.plaintiffArgument}
+`;
+}
+
+function renderEvidenceReinforcement(v: Vulnerability): string {
+  return `### 🔧 强化证据指引 (${v.id})
+
+> **由抗辩自检器自动注入**
+
+**问题**: ${v.attack}
+
+**建议补充证据**:
+${v.suggestedFix}
+
+**法条**: ${v.legalBasis ?? ''}
+`;
+}
+
+/**
  * 规则引擎自检
  * 基于 8 个反点的"已知攻击向量", 找出答辩状的漏洞
  */

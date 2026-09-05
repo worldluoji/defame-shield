@@ -24,6 +24,8 @@ import { generateCommand } from './commands/generate.js';
 import { analyzeComplaintCommand } from './commands/analyze.js';
 import { selfCheckCommand } from './commands/self-check.js';
 import { fillDefenseCommand } from './commands/fill-defense.js';
+import { exportPdfCommand } from './commands/export-pdf.js';
+import { applyFixesCommand } from './commands/apply-fixes.js';
 import { out } from './utils/console.js';
 
 loadEnvFile();
@@ -72,6 +74,21 @@ fillCmd
   .option('--yes', '跳过确认, 直接开始', false)
   .option('--out <path>', '输出路径 (默认: <原名>-filled.md)')
   .action(fillDefenseCommand);
+
+const applyCmd = program.command('apply-fixes <defense>').description('自检修补建议自动注入答辩状');
+applyCmd
+  .requiredOption('--analysis <json>', '拆解结果 JSON 路径')
+  .option('--out <path>', '输出路径 (默认: <原名>-patched.md)')
+  .option('--critical-only', '仅注入 critical 风险', false)
+  .option('--vulnerabilities <json>', '使用已有漏洞列表, 跳过 self-check')
+  .action(applyFixesCommand);
+
+const exportCmd = program.command('export-pdf <file>').description('Markdown → PDF 转换 (中国法院文书排版)');
+exportCmd
+  .option('--out <path>', '输出 PDF 路径 (默认: <同名>.pdf)')
+  .option('--case-number <number>', '案号 (页脚显示)')
+  .option('--title <title>', 'PDF 文档标题')
+  .action(exportPdfCommand);
 
 const selfCheckCmd = program.command('self-check <defense>').description('抗辩自检 — 模拟原告律师找漏洞');
 selfCheckCmd
