@@ -1,0 +1,371 @@
+/**
+ * 抗辩自检器 (Defense Self-Checker)
+ *
+ * 目的: 模拟原告律师, 从原告视角攻击答辩状, 找出漏洞。
+ *
+ * 输入: 答辩状 markdown + 拆解结果
+ * 输出: 漏洞列表 — 每个漏洞包含: 攻击方向 / 风险等级 / 原告可能论据 / 建议补丁
+ *
+ * 双模式:
+ *   - ai:  LLM 驱动 (拟人化强, 但慢/贵)
+ *   - rule: 规则引擎 (基于 8 个反点的"已知攻击向量", 快/可解释)
+ */
+
+import { callLLM } from '../llm/client.js';
+import type { ComplaintAnalysis, ParsedClaim } from '../analyzer/complaint-types.js';
+import type { RebuttalStrategy, StrategyId } from './strategies-base.js';
+import { STRATEGIES, PROCEDURAL_IDS } from './strategies.js';
+
+export type RiskLevel = 'critical' | 'high' | 'medium' | 'low';
+export type CheckMode = 'ai' | 'rule' | 'hybrid';
+
+export interface Vulnerability {
+  id: string;
+  /** 攻击方向 (原告律师角度的论据) */
+  attack: string;
+  /** 风险等级 */
+  risk: RiskLevel;
+  /** 涉及的反点 ID */
+  strategyId: StrategyId;
+  /** 涉及的原告诉请 index (可选) */
+  claimIndex?: number;
+  /** 原告可能的论据展开 */
+  plaintiffArgument: string;
+  /** 建议补丁 (被告应该补充什么) */
+  suggestedFix: string;
+  /** 涉及的具体法律条文 */
+  legalBasis?: string;
+}
+
+export interface SelfCheckResult {
+  ok: true;
+  mode: CheckMode;
+  /** 漏洞列表 (按风险等级倒序) */
+  vulnerabilities: Vulnerability[];
+  /** 整体评分 0-100, 越高表示答辩状越坚固 */
+  overallScore: number;
+  /** 摘要 */
+  summary: string;
+  /** 自检时间 */
+  checkedAt: string;
+}
+
+export interface SelfCheckOptions {
+  /** 答辩状 markdown 内容 */
+  defense: string;
+  /** 拆解结果 */
+  analysis: ComplaintAnalysis;
+  /** 模式: ai / rule / hybrid (默认 rule, 无需 API key) */
+  mode?: CheckMode;
+  /** LLM provider */
+  provider?: 'deepseek' | 'minimax';
+}
+
+export async function selfCheckDefense(opts: SelfCheckOptions): Promise<SelfCheckResult> {
+  const mode = opts.mode ?? 'rule';
+
+  let ruleVulns: Vulnerability[] = [];
+  let aiVulns: Vulnerability[] = [];
+
+  // 1. 规则引擎 (基础)
+  ruleVulns = ruleBasedCheck(opts.defense, opts.analysis);
+
+  // 2. AI 模式 (可选)
+  if (mode === 'ai' || mode === 'hybrid') {
+    const aiResult = await aiBasedCheck(opts.defense, opts.analysis, opts.provider);
+    if (aiResult) {
+      aiVulns = aiResult;
+    }
+  }
+
+  // 3. 合并去重
+  const merged = mode === 'rule' ? ruleVulns : mergeAndDedup(ruleVulns, aiVulns);
+
+  // 4. 评分
+  const overallScore = computeOverallScore(merged);
+
+  return {
+    ok: true,
+    mode,
+    vulnerabilities: merged.sort(byRisk),
+    overallScore,
+    summary: makeSummary(merged, overallScore),
+    checkedAt: new Date().toISOString(),
+  };
+}
+
+/**
+ * 规则引擎自检
+ * 基于 8 个反点的"已知攻击向量", 找出答辩状的漏洞
+ */
+function ruleBasedCheck(defense: string, analysis: ComplaintAnalysis): Vulnerability[] {
+  const vulns: Vulnerability[] = [];
+  const usedStrategies = detectUsedStrategies(defense);
+
+  // === 通用检查 ===
+  // 1. 答辩状是否过短 (说明事实部分没写)
+  if (defense.length < 1500) {
+    vulns.push({
+      id: 'too-short',
+      attack: '答辩状过短, 事实部分含糊, 容易被法官认为举证不充分',
+      risk: 'high',
+      strategyId: 'no-act',
+      plaintiffArgument: '原告律师: "被告的答辩状仅 1 页, 对原告提交的多份证据未做具体回应, 显然属于消极答辩, 法庭应按原告证据认定事实。"',
+      suggestedFix: '补充 [事实与理由 - 答辩人视角] 章节, 对原告的每条证据逐一回应',
+    });
+  }
+
+  // 2. 是否还含 [待补充] 占位符
+  const placeholders = (defense.match(/\[待补充[^\]]*\]|\[.{1,30}\]/g) ?? []).filter(
+    (p) => !p.includes('**') || p.includes('待补充'),
+  );
+  if (placeholders.length > 0) {
+    vulns.push({
+      id: 'unfilled-placeholders',
+      attack: `答辩状含 ${placeholders.length} 处未填占位符 (如 ${placeholders.slice(0, 3).join(', ')}), 律师未补充案件特有事实`,
+      risk: 'critical',
+      strategyId: 'no-act',
+      plaintiffArgument: `原告律师: "被告的答辩状大量使用 [xxx] 形式的占位符, 明显是 AI 生成的模板, 缺乏针对本案的实质性抗辩意见, 法庭不应采信。"`,
+      suggestedFix: `逐一填充所有 [待补充] 占位符, 写入本案特有事实 (如信息来源、核实经过、损害与被告行为无关的证据等)`,
+    });
+  }
+
+  // 3. 4 要件评分检查
+  if (analysis.elementScore.factAuthenticity === 'likely_true' && usedStrategies.includes('fact-true')) {
+    // 用了 fact-true 但事实 likely_true, OK; 但需要核实义务证据
+    if (!/核实|核验|查证|采访|调查|证据链/.test(defense)) {
+      vulns.push({
+        id: 'fact-true-no-verification',
+        attack: '选择"事实基本属实"反点但未充分举证核实义务',
+        risk: 'high',
+        strategyId: 'fact-true',
+        plaintiffArgument: '原告律师: "被告主张事实基本属实并以舆论监督免责, 但被告未能证明其已尽到合理核实义务, 依据民法典 1025 条第二项, 不应免责。"',
+        suggestedFix: '在 fact-true 反点段落后, 补充: 1) 信息来源 (政府文件/公开判决/权威报道); 2) 核实过程 (采访记录/邮件/电话录音); 3) 权威第三方对事实的认定',
+        legalBasis: '《中华人民共和国民法典》第一千零二十五条第二项',
+      });
+    }
+  }
+
+  if (analysis.elementScore.damage === 'strong' && usedStrategies.includes('no-damage')) {
+    vulns.push({
+      id: 'no-damage-weak-against-strong',
+      attack: '选择"无损害后果"反点但原告已充分举证损害',
+      risk: 'critical',
+      strategyId: 'no-damage',
+      plaintiffArgument: '原告律师: "原告已提交医院诊断证明、劳动合同解除通知、收入减少的银行流水等, 损害事实清楚。被告仅以"未能举证"否认, 但原告举证已充分, 法庭应认定损害存在。"',
+      suggestedFix: '改用"无因果关系"反点, 强调损害系原告自身原因 (既往负面评价) 或第三人行为所致, 而非被告内容导致',
+      legalBasis: '《中华人民共和国民法典》第一千零二十四条',
+    });
+  }
+
+  // 4. 程序性反点检查
+  for (const id of PROCEDURAL_IDS) {
+    const strategy = STRATEGIES[id];
+    const score = strategy.applicability(analysis);
+    if (score >= 0.7 && !usedStrategies.includes(id)) {
+      vulns.push({
+        id: `missing-${id}`,
+        attack: `反点 "${strategy.name}" 高度适用 (适用度 ${(score * 100).toFixed(0)}%), 答辩状未采用`,
+        risk: 'critical',
+        strategyId: id,
+        plaintiffArgument: `原告律师: "被告未就 [诉讼时效/管辖/被告主体] 提出抗辩, 视为放弃相应抗辩权。法庭应直接审查实体争议。"`,
+        suggestedFix: `在答辩状中显式采纳 "${strategy.name}" 反点. ${strategy.description}`,
+        legalBasis: strategy.legalBasis,
+      });
+    }
+  }
+
+  // 5. 诉请匹配检查 — 诉请越多, 越要逐条回应
+  for (const claim of analysis.claims) {
+    const matched = usedStrategies.length; // 简化: 用过几个反点
+    if (claim.content.length > 30 && !defense.includes(`诉请 ${claim.index}：`)) {
+      vulns.push({
+        id: `claim-${claim.index}-no-response`,
+        attack: `诉请 ${claim.index} (${claim.content.slice(0, 20)}...) 在答辩状中未明确回应`,
+        risk: 'high',
+        strategyId: 'no-damage',
+        claimIndex: claim.index,
+        plaintiffArgument: `原告律师: "被告对诉请 ${claim.index} 未作实质性回应, 视为放弃抗辩, 法庭应支持该项请求。"`,
+        suggestedFix: `为诉请 ${claim.index} 添加完整反驳段落, 明确 [所选反点] + [具体理由] + [证据指引]`,
+      });
+    }
+  }
+
+  // 6. 证据指引检查
+  if (!/证据清单|证据指引|补充.*证据/.test(defense)) {
+    vulns.push({
+      id: 'no-evidence-guidance',
+      attack: '答辩状未列出需要补充的证据清单, 律师可能遗漏关键证据',
+      risk: 'medium',
+      strategyId: 'no-damage',
+      plaintiffArgument: '原告律师: "被告仅作笼统抗辩, 未提交任何支持其抗辩意见的证据, 法庭应认定被告抗辩缺乏证据支持。"',
+      suggestedFix: '在答辩状末尾添加 [答辩证据清单] 章节, 列出支持每个反点的具体证据 (如: 公证书、平台注册信息、信息来源原始材料等)',
+    });
+  }
+
+  // 7. 类案参考检查
+  if (!/类案参考|裁判要点|指导案例/.test(defense)) {
+    vulns.push({
+      id: 'no-case-references',
+      attack: '答辩状未引用任何类案, 缺乏对同类案件裁判规则的说服力',
+      risk: 'low',
+      strategyId: 'no-damage',
+      plaintiffArgument: '原告律师: "被告未引用任何类案支持其抗辩意见, 法庭在无类案指引的情况下应严格按法条文义裁判。"',
+      suggestedFix: '在 [类案参考] 章节增加 3-5 条同类案件裁判要点 (从本工具的策略库或裁判文书网查找)',
+    });
+  }
+
+  // 8. 法律依据引用检查
+  const citedLaws = countLegalBasis(defense);
+  if (citedLaws < 3) {
+    vulns.push({
+      id: 'few-legal-basis',
+      attack: `答辩状仅引用 ${citedLaws} 条法律, 可能被法官认为论证不充分`,
+      risk: 'medium',
+      strategyId: 'no-damage',
+      plaintiffArgument: `原告律师: "被告答辩状仅引用 ${citedLaws} 条法律, 对原告依据的民法典 1024、1025、1183 等核心条文未做实质性反驳, 法庭应按原告法律意见裁判。"`,
+      suggestedFix: '对原告引用的每条法条逐一回应, 区分"同意" / "反对" / "另有解释"',
+    });
+  }
+
+  return vulns;
+}
+
+/**
+ * AI 模式自检 — 模拟原告律师
+ */
+async function aiBasedCheck(
+  defense: string,
+  analysis: ComplaintAnalysis,
+  provider?: 'deepseek' | 'minimax',
+): Promise<Vulnerability[] | null> {
+  const system = `你是一名资深民事诉讼律师, **代理原告**, 任务是攻击用户提供的"被告答辩状", 找出其**逻辑漏洞、证据缺口、事实矛盾、程序瑕疵**。
+
+输出格式: 严格 JSON 数组, 每条包含:
+- id: 唯一标识
+- attack: 攻击点 (一句话)
+- risk: critical / high / medium / low
+- strategyId: 对应的反点 ID
+- claimIndex: 涉及的原告诉请 index (可选)
+- plaintiffArgument: 你的论据展开 (100-200 字)
+- suggestedFix: 建议被告如何修补
+- legalBasis: 相关法条 (可选)
+
+**只输出 JSON 数组, 不要任何额外说明**。`;
+
+  const user = `## 原告起诉状拆解结果
+
+${JSON.stringify(analysis, null, 2)}
+
+## 被告答辩状
+
+\`\`\`markdown
+${defense}
+\`\`\`
+
+请从原告律师视角, 找出答辩状的 5-10 个最致命漏洞。`;
+
+  const result = await callLLM(
+    [
+      { role: 'system', content: system },
+      { role: 'user', content: user },
+    ],
+    { provider, temperature: 0.5, maxTokens: 4000 },
+  );
+
+  if (!result.ok) return null;
+
+  // 解析 JSON
+  const arr = extractJsonArray(result.text);
+  if (!arr) return null;
+
+  return arr.map((item, i) => normalizeVulnerability(item, i));
+}
+
+function normalizeVulnerability(item: unknown, i: number): Vulnerability {
+  const o = (item ?? {}) as Record<string, unknown>;
+  return {
+    id: String(o['id'] ?? `ai-vuln-${i}`),
+    attack: String(o['attack'] ?? ''),
+    risk: (o['risk'] as RiskLevel) ?? 'medium',
+    strategyId: (o['strategyId'] as StrategyId) ?? 'no-damage',
+    claimIndex: typeof o['claimIndex'] === 'number' ? o['claimIndex'] : undefined,
+    plaintiffArgument: String(o['plaintiffArgument'] ?? ''),
+    suggestedFix: String(o['suggestedFix'] ?? ''),
+    legalBasis: o['legalBasis'] ? String(o['legalBasis']) : undefined,
+  };
+}
+
+function extractJsonArray(text: string): unknown[] | null {
+  // 兼容 ```json``` 包裹
+  const m = text.match(/```(?:json)?\s*\n?([\s\S]+?)\n?```/);
+  const jsonText = m && m[1] ? m[1] : text;
+  const first = jsonText.indexOf('[');
+  const last = jsonText.lastIndexOf(']');
+  if (first < 0 || last < 0) return null;
+  try {
+    return JSON.parse(jsonText.slice(first, last + 1));
+  } catch {
+    return null;
+  }
+}
+
+function mergeAndDedup(ruleVulns: Vulnerability[], aiVulns: Vulnerability[]): Vulnerability[] {
+  // 按 attack 文本相似度去重, AI 优先 (描述更详细)
+  const seen = new Set<string>();
+  const result: Vulnerability[] = [];
+  for (const v of [...aiVulns, ...ruleVulns]) {
+    const key = normalizeKey(v.attack);
+    if (seen.has(key)) continue;
+    seen.add(key);
+    result.push(v);
+  }
+  return result;
+}
+
+function normalizeKey(s: string): string {
+  return s.replace(/[^\u4e00-\u9fa5a-zA-Z]/g, '').slice(0, 30);
+}
+
+function detectUsedStrategies(defense: string): StrategyId[] {
+  const result: StrategyId[] = [];
+  const all: StrategyId[] = [
+    'fact-true', 'no-act', 'no-tort-grade', 'no-damage', 'no-causation',
+    'statute-limitations', 'jurisdiction', 'wrong-party',
+  ];
+  for (const id of all) {
+    const s = STRATEGIES[id];
+    if (defense.includes(s.name)) {
+      result.push(id);
+    }
+  }
+  return result;
+}
+
+function countLegalBasis(defense: string): number {
+  // 粗略数 "第xxx条" 出现次数
+  return (defense.match(/第[零一二三四五六七八九十百千\d]+条/g) ?? []).length;
+}
+
+function computeOverallScore(vulns: Vulnerability[]): number {
+  let score = 100;
+  for (const v of vulns) {
+    const deduction = v.risk === 'critical' ? 20 : v.risk === 'high' ? 10 : v.risk === 'medium' ? 5 : 2;
+    score -= deduction;
+  }
+  return Math.max(0, score);
+}
+
+function byRisk(a: Vulnerability, b: Vulnerability): number {
+  const order: Record<RiskLevel, number> = { critical: 0, high: 1, medium: 2, low: 3 };
+  return order[a.risk] - order[b.risk];
+}
+
+function makeSummary(vulns: Vulnerability[], score: number): string {
+  const counts: Record<RiskLevel, number> = { critical: 0, high: 0, medium: 0, low: 0 };
+  for (const v of vulns) counts[v.risk]++;
+  if (score >= 85) return `答辩状较为坚固 (${score} 分), 仅有少量低风险漏洞`;
+  if (score >= 70) return `答辩状有若干需要修补的中等风险漏洞 (${score} 分)`;
+  if (score >= 50) return `答辩状存在较多高风险漏洞 (${score} 分), 建议优先修补 critical/high 项`;
+  return `答辩状存在致命漏洞 (${score} 分), 强烈建议重新审视整体策略`;
+}

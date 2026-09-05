@@ -1,8 +1,10 @@
 /**
- * 反驳策略库 — 5 个核心反点
+ * 反驳策略库 — 5 个核心实体反点 (实体性)
  *
- * 民事名誉权侵权四要件: 违法行为 + 主观过错 + 损害后果 + 因果关系
- * 答辩的 5 个核心反点(按杀伤力排):
+ * 程序性反点 (诉讼时效/管辖/主体不适格) 单独在 procedural.ts,
+ * 因为它们"一票否决"性质, 优先于实体反点。
+ *
+ * 5 个核心实体反点:
  *   1. fact-true         事实基本属实 / 舆论监督免责 (1025 条)
  *   2. no-act            未实施被诉行为
  *   3. no-tort-grade     未达名誉权侵害程度
@@ -17,37 +19,16 @@
  *   - 引用法条
  */
 
-import type { ComplaintAnalysis, ElementScore, ParsedClaim } from '../analyzer/complaint-types.js';
+import type { ComplaintAnalysis, ParsedClaim } from '../analyzer/complaint-types.js';
+import type { RebuttalStrategy, StrategyId } from './strategies-base.js';
+import { PROCEDURAL_STRATEGIES, PROCEDURAL_IDS } from './procedural.js';
 
-/** 策略适用度评分 (0-1), 0 = 完全不适用, 1 = 高度适用 */
-export type Applicability = number;
-
-export interface CaseRef {
-  title: string;
-  holding: string;
-  applicableWhen: string;
-}
-
-export interface RebuttalStrategy {
-  id: StrategyId;
-  name: string;
-  /** 适用情形描述 */
-  description: string;
-  /** 适用度评分函数 — 根据拆解结果返回 0-1 */
-  applicability: (a: ComplaintAnalysis) => Applicability;
-  /** 通用措辞模板 (Markdown 段落) */
-  template: string;
-  /** 需要补充的证据清单 */
-  evidenceToGather: string[];
-  /** 引用法条 */
-  legalBasis: string;
-  /** 类案参考 */
-  caseRefs: CaseRef[];
-}
-
-export type StrategyId = 'fact-true' | 'no-act' | 'no-tort-grade' | 'no-damage' | 'no-causation';
+export { PROCEDURAL_STRATEGIES, PROCEDURAL_IDS };
+export type { RebuttalStrategy, StrategyId };
 
 export const STRATEGIES: Record<StrategyId, RebuttalStrategy> = {
+  ...PROCEDURAL_STRATEGIES,
+
   // ============================================
   // 反点 1: 事实基本属实 / 舆论监督免责
   // ============================================
@@ -57,10 +38,8 @@ export const STRATEGIES: Record<StrategyId, RebuttalStrategy> = {
     description:
       '被告所述内容有合理信息来源或已尽到合理核实义务, 不构成捏造/歪曲事实, 依法属于舆论监督的免责情形',
     applicability: (a) => {
-      // 高分: 事实真实性 likely_true
       if (a.elementScore.factAuthenticity === 'likely_true') return 0.95;
       if (a.elementScore.factAuthenticity === 'disputed') return 0.6;
-      // 内容涉及公共利益
       if (/公益|社会|行业|公共|大众|消费者|群众|人民/.test(a.facts.tortContent)) return 0.5;
       return 0.2;
     },
@@ -111,10 +90,8 @@ export const STRATEGIES: Record<StrategyId, RebuttalStrategy> = {
     description:
       '被诉侵权行为并非被告所为 — 账号非被告所有/内容非被告发布/转帖非被告原创等',
     applicability: (a) => {
-      // 拆解结果中若事实描述不明确/可质疑, 适用度提高
       if (a.confidence < 0.4) return 0.7;
       if (a.facts.tortMethod === '（未识别）') return 0.6;
-      // 涉匿名/网名场景
       if (/匿名|网名|账号|昵称|@/.test(a.facts.tortContent)) return 0.4;
       return 0.2;
     },
@@ -246,7 +223,6 @@ export const STRATEGIES: Record<StrategyId, RebuttalStrategy> = {
       '原告主张的损害后果与被告行为之间不存在直接因果关系, 损害系其他原因 (原告自身原因/第三人行为/既往负面评价等) 所致',
     applicability: (a) => {
       if (a.elementScore.damage === 'none_proven') return 0.6;
-      // 原告存在既往负面评价
       if (/曾|之前|既往|此前|早已/.test(a.facts.tortContent)) return 0.5;
       return 0.3;
     },
@@ -288,10 +264,9 @@ export const STRATEGIES: Record<StrategyId, RebuttalStrategy> = {
 export function selectStrategies(analysis: ComplaintAnalysis, topN: number = 3): RebuttalStrategy[] {
   const scored = Object.values(STRATEGIES)
     .map((s) => ({ strategy: s, score: s.applicability(analysis) }))
-    .filter((x) => x.score >= 0.3) // 适用度太低的不选
+    .filter((x) => x.score >= 0.3)
     .sort((a, b) => b.score - a.score);
 
-  // 兜底: 至少选一个 (无因关系或无损害)
   if (scored.length === 0) {
     return [STRATEGIES['no-damage']];
   }
@@ -301,18 +276,25 @@ export function selectStrategies(analysis: ComplaintAnalysis, topN: number = 3):
 
 /**
  * 针对单条诉请, 选出最合适的反点
+ *
+ * 关键逻辑: 程序性反点 (一票否决性) 适用度 >= 0.6 时, 强制选择
  */
-export function selectStrategyForClaim(
-  claim: ParsedClaim,
-  analysis: ComplaintAnalysis,
-): RebuttalStrategy {
-  // 诉请类型 → 优先反点
+export function selectStrategyForClaim(claim: ParsedClaim, analysis: ComplaintAnalysis): RebuttalStrategy {
+  // 程序性反点一票否决
+  for (const id of PROCEDURAL_IDS) {
+    const s = STRATEGIES[id];
+    if (s.applicability(analysis) >= 0.6) {
+      return s;
+    }
+  }
+
+  // 诉请类型 → 优先实体反点
   const priorityMap: Record<ParsedClaim['type'], StrategyId[]> = {
     stop_infringement: ['no-act', 'no-tort-grade', 'fact-true'],
     restore_reputation: ['no-act', 'no-tort-grade', 'fact-true'],
     compensate_loss: ['no-damage', 'no-causation'],
     spiritual_compensation: ['no-damage', 'no-causation'],
-    litigation_cost: ['no-damage'], // 案件受理费由败诉方承担, 答辩中通常无独立反点
+    litigation_cost: ['no-damage'],
     other: ['no-tort-grade', 'fact-true', 'no-damage'],
   };
 
@@ -324,5 +306,5 @@ export function selectStrategyForClaim(
       return s;
     }
   }
-  return STRATEGIES['no-damage']; // 兜底
+  return STRATEGIES['no-damage'];
 }

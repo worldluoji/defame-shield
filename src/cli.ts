@@ -22,6 +22,7 @@ import { configShowCommand, configSetCommand } from './commands/config.js';
 import { caseNewCommand, caseListCommand, caseShowCommand } from './commands/case.js';
 import { generateCommand } from './commands/generate.js';
 import { analyzeComplaintCommand } from './commands/analyze.js';
+import { selfCheckCommand } from './commands/self-check.js';
 import { out } from './utils/console.js';
 
 loadEnvFile();
@@ -64,6 +65,15 @@ analyzeCmd
   .option('--silent', '静默模式, 不输出 JSON 内容', false)
   .option('--extra <text>', '给 LLM 的额外指令')
   .action(analyzeComplaintCommand);
+
+const selfCheckCmd = program.command('self-check <defense>').description('抗辩自检 — 模拟原告律师找漏洞');
+selfCheckCmd
+  .requiredOption('--analysis <json>', '拆解结果 JSON 路径')
+  .option('--mode <mode>', '模式: rule | ai | hybrid (默认 rule)', 'rule')
+  .option('--provider <provider>', 'LLM provider (deepseek/minimax)')
+  .option('--out <path>', '输出 JSON 路径')
+  .option('--severe-only', '仅显示 critical/high 漏洞', false)
+  .action(selfCheckCommand);
 
 const genCmd = program.command('generate <type>').description('生成文书');
 genCmd

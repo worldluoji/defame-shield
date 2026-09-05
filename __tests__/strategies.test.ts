@@ -43,6 +43,22 @@ describe('STRATEGIES 库完整性', () => {
     );
   });
 
+  it('8 个反点齐备 (含 3 个程序性)', () => {
+    expect(Object.keys(STRATEGIES)).toHaveLength(8);
+    expect(Object.keys(STRATEGIES)).toEqual(
+      expect.arrayContaining([
+        'fact-true',
+        'no-act',
+        'no-tort-grade',
+        'no-damage',
+        'no-causation',
+        'statute-limitations',
+        'jurisdiction',
+        'wrong-party',
+      ]),
+    );
+  });
+
   it('每个策略必填字段完整', () => {
     for (const s of Object.values(STRATEGIES)) {
       expect(s.id).toBeTruthy();
@@ -65,6 +81,52 @@ describe('STRATEGIES 库完整性', () => {
         expect(ref.title).not.toMatch(/（\d{4}）|\d{4}年/);
       }
     }
+  });
+});
+
+describe('程序性反点 (一票否决性)', () => {
+  it('诉讼时效: 侵权 4 年前 → 适用度 >= 0.6', () => {
+    const a = mkAnalysis({
+      facts: { tortMethod: '微博', tortContent: '内容', spread: '', time: '2021 年 3 月' },
+    });
+    const s = STRATEGIES['statute-limitations'];
+    expect(s.applicability(a)).toBeGreaterThanOrEqual(0.6);
+  });
+
+  it('诉讼时效: 侵权 1 年内 → 适用度低', () => {
+    const currentYear = new Date().getFullYear();
+    const a = mkAnalysis({
+      facts: { tortMethod: '微博', tortContent: '内容', spread: '', time: `${currentYear} 年 1 月` },
+    });
+    const s = STRATEGIES['statute-limitations'];
+    expect(s.applicability(a)).toBeLessThan(0.5);
+  });
+
+  it('selectStrategyForClaim: 诉讼时效 4 年前 → 一票否决', () => {
+    const a = mkAnalysis({
+      facts: { tortMethod: '微博', tortContent: '内容', spread: '', time: '2021 年 3 月' },
+      elementScore: { ...mkAnalysis().elementScore, damage: 'strong' }, // 即使损害充分, 也优先时效
+    });
+    const claim = a.claims[0]!; // stop_infringement
+    const s = selectStrategyForClaim(claim, a);
+    expect(s.id).toBe('statute-limitations');
+  });
+
+  it('wrong-party: 平台发布 → 适用度 0.6', () => {
+    const a = mkAnalysis({
+      facts: { tortMethod: '某平台APP', tortContent: '内容', spread: '' },
+    });
+    expect(STRATEGIES['wrong-party'].applicability(a)).toBeGreaterThanOrEqual(0.6);
+  });
+
+  it('程序性反点优先级高于实体反点', () => {
+    // 即使事实 likely_true (高分), 如果诉讼时效 4 年, 仍选 statute-limitations
+    const a = mkAnalysis({
+      facts: { tortMethod: '微博', tortContent: '内容', spread: '', time: '2021 年 3 月' },
+      elementScore: { ...mkAnalysis().elementScore, factAuthenticity: 'likely_true' },
+    });
+    const s = selectStrategyForClaim(a.claims[0]!, a);
+    expect(s.id).toBe('statute-limitations');
   });
 });
 

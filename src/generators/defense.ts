@@ -149,7 +149,7 @@ ${overallStrategies.map((s, i) => `${i + 1}. **${s.name}**：${s.description}`).
 
   for (const claim of analysis.claims) {
     const strategy = claimStrategyMap.get(claim.index) ?? overallStrategies[0]!;
-    sections.push(renderClaimRebuttal(claim, strategy));
+    sections.push(renderClaimRebuttal(claim, strategy, { analysis: opts.analysis, case: opts.case }));
     sections.push('\n---\n\n');
   }
 
@@ -241,13 +241,30 @@ ${c.lawyer?.name ?? ''}
 /**
  * 单条诉请的反驳段落
  */
-function renderClaimRebuttal(claim: ParsedClaim, strategy: RebuttalStrategy): string {
+function renderClaimRebuttal(claim: ParsedClaim, strategy: RebuttalStrategy, context: { analysis: ComplaintAnalysis; case: Case }): string {
   const amountStr = claim.amount ? `（${claim.amount.toLocaleString('zh-CN')} 元）` : '';
+  // 程序性反点模板里的 {placeholder} 替换为可读形式
+  const today = new Date().toISOString().slice(0, 10);
+  const tortTime = context.analysis.facts.time ?? '__________';
+  const filingTime = today;
+  const elapsed = '__________';
+  const defendantAddress = context.case.defendant.address ?? '__________';
+  const court = context.case.court ?? '__________';
+  const platform = context.analysis.facts.place ?? context.analysis.facts.tortMethod ?? '__________';
+
+  let template = strategy.template
+    .replace(/\{tortTime\}/g, tortTime)
+    .replace(/\{filingTime\}/g, filingTime)
+    .replace(/\{elapsed\}/g, elapsed)
+    .replace(/\{defendantAddress\}/g, defendantAddress)
+    .replace(/\{court\}/g, court)
+    .replace(/\{platform\}/g, platform);
+
   return `### 诉请 ${claim.index}：${claim.content.slice(0, 50)}${claim.content.length > 50 ? '...' : ''}${amountStr}
 
 **所选反点**：${strategy.name}（${strategy.legalBasis}）
 
-${strategy.template.replace(/\[(.+?)\]/g, '**[$1]**')}
+${template.replace(/\[(.+?)\]/g, '**[$1]**')}
 `;
 }
 
