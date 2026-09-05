@@ -150,8 +150,34 @@ describe('类型契约', () => {
     expect(Array.isArray(a.claims)).toBe(true);
     expect(Array.isArray(a.evidence)).toBe(true);
     expect(Array.isArray(a.legalBasis)).toBe(true);
+    expect(Array.isArray(a.legalBasisItems)).toBe(true);
     expect(Array.isArray(a.rebuttalPriority)).toBe(true);
     expect(Array.isArray(a.warnings)).toBe(true);
     expect(typeof a.elementScore).toBe('object');
+  });
+});
+
+describe('扩字段 (C)', () => {
+  it('抽取起诉法院 courtOfFiling', async () => {
+    const res = await analyzeComplaint(SAMPLE_COMPLAINT, { draft: true });
+    if (!res.ok) throw new Error('fail');
+    expect(res.analysis.courtOfFiling).toBe('北京市东城区人民法院');
+  });
+
+  it('legalBasisItems 结构化 (含 category/article)', async () => {
+    const res = await analyzeComplaint(SAMPLE_COMPLAINT, { draft: true });
+    if (!res.ok) throw new Error('fail');
+    expect(res.analysis.legalBasisItems.length).toBeGreaterThanOrEqual(1);
+    const first = res.analysis.legalBasisItems[0]!;
+    expect(first.category).toBe('民法典');
+    // SAMPLE 用汉字 "第一千零二十四条", article 字段是汉字数字
+    expect(first.article).toMatch(/一千零二十四|一千零二十五/);
+  });
+
+  it('evidence 含 source/acquiredAt/notarized 字段 (空时为 undefined)', async () => {
+    const res = await analyzeComplaint(SAMPLE_COMPLAINT, { draft: true });
+    if (!res.ok) throw new Error('fail');
+    // SAMPLE 没有显式证据段, 所以 evidence 应该空
+    expect(res.analysis.evidence).toEqual([]);
   });
 });

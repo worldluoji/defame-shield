@@ -21,6 +21,7 @@ import type {
   ParsedFacts,
   ElementScore,
   CaseReference,
+  LegalBasisItem,
 } from './complaint-types.js';
 
 const ANALYZER_SYSTEM_PROMPT = `你是一名中国民事诉讼律师，专长名誉权纠纷案件的**被告应诉**工作。
@@ -54,10 +55,26 @@ const ANALYZER_SYSTEM_PROMPT = `你是一名中国民事诉讼律师，专长名
 - place: 侵权地点/平台
 
 ### 4. 证据 (evidence)
-按编号提取每条证据的：名称、种类、证明目的。
+按编号提取每条证据的：
+- name: 名称
+- kind: 种类
+- purpose: 证明目的
+- source: 来源/出处
+- acquiredAt: 取得时间 (ISO 格式 YYYY-MM-DD)
+- notarized: 是否经公证 (true/false)
+- notaryInfo: 公证机构及编号
 
-### 5. 法律依据 (legalBasis)
-原告引用的所有法条编号（如"民法典第 1024 条""民法典第 1183 条"等），逐条列出。
+### 5. 法律依据 (legalBasis + legalBasisItems)
+原告引用的所有法条，逐条列出：
+- legalBasis: 字符串数组 (e.g. ["《中华人民共和国民法典》第一千零二十四条"])
+- legalBasisItems: 结构化对象数组，每条含:
+  - raw: 法条原文
+  - category: 民法典 / 民诉法 / 司法解释 / 其他
+  - article: 条款号 (e.g. "1024")
+  - articleText: 法条原文内容 (从公开法条库获取, 若无法获取可留空)
+
+### 6. 起诉法院 (courtOfFiling)
+"此致" 后面的人民法院名称, 例如 "北京市朝阳区人民法院"。
 
 ## 4 要件评分 (elementScore) — 关键
 
@@ -207,6 +224,7 @@ function parseAndValidateLLMJson(
   }
 
   // 标准化 + 兜底字段
+  const legalBasisItems = normalizeLegalBasisItems(obj.legalBasisItems as unknown[] | undefined, obj.legalBasis as unknown[]);
   const analysis: ComplaintAnalysis = {
     source,
     analyzedAt: new Date().toISOString(),
@@ -216,7 +234,8 @@ function parseAndValidateLLMJson(
     claims: normalizeClaims(obj.claims as unknown[]),
     facts: normalizeFacts(obj.facts as Record<string, unknown>),
     evidence: normalizeEvidence(obj.evidence as unknown[] | undefined),
-    legalBasis: Array.isArray(obj.legalBasis) ? obj.legalBasis.map(String) : [],
+    legalBasis: legalBasisItems.map((i) => i.raw),
+    legalBasisItems,
     elementScore: normalizeElementScore(obj.elementScore as Record<string, unknown> | undefined),
     rebuttalPriority: normalizePriority(obj.rebuttalPriority as unknown[] | undefined, obj.claims as unknown[]),
     confidence: typeof obj.confidence === 'number' ? Math.max(0, Math.min(1, obj.confidence)) : 0.5,
@@ -224,6 +243,10 @@ function parseAndValidateLLMJson(
     caseReferences: Array.isArray(obj.caseReferences)
       ? (obj.caseReferences as CaseReference[])
       : undefined,
+    courtOfFiling: obj.courtOfFiling || obj['court'] || obj['起诉法院']
+      ? String(obj.courtOfFiling ?? obj['court'] ?? obj['起诉法院'])
+      : undefined,
+    caseNumber: obj.caseNumber || obj['案号'] ? String(obj.caseNumber ?? obj['案号']) : undefined,
   };
 
   return { ok: true, analysis };
@@ -288,6 +311,10 @@ function normalizeEvidence(arr: unknown[] | undefined): ParsedEvidence[] {
         name: String(o['name'] ?? o['名称'] ?? ''),
         kind: String(o['kind'] ?? o['种类'] ?? ''),
         purpose: String(o['purpose'] ?? o['证明目的'] ?? ''),
+        source: o['source'] || o['来源'] ? String(o['source'] ?? o['来源']) : undefined,
+        acquiredAt: o['acquiredAt'] || o['取得时间'] ? String(o['acquiredAt'] ?? o['取得时间']) : undefined,
+        notarized: o['notarized'] === true || /公证书|公证/.test(String(o['name'] ?? o['名称'] ?? '')),
+        notaryInfo: o['notaryInfo'] || o['公证信息'] ? String(o['notaryInfo'] ?? o['公证信息']) : undefined,
       } as ParsedEvidence;
     })
     .filter((x): x is ParsedEvidence => x !== null);
@@ -313,6 +340,53 @@ function normalizePriority(arr: unknown[] | undefined, claims: unknown[]): numbe
 }
 
 /**
+ * 标准化法律依据 — 字符串列表 → 结构化
+ * 兼容:
+ *   - 结构化对象数组: [{raw, category, article, articleText}, ...]
+ *   - 字符串数组: ["民法典第一千零二十四条", ...] → 转结构化
+ */
+function normalizeLegalBasisItems(structured: unknown[] | undefined, fallback: unknown[] | undefined): LegalBasisItem[] {
+  if (Array.isArray(structured) && structured.length > 0 && typeof structured[0] === 'object') {
+    return structured.map((item) => {
+      const o = item as Record<string, unknown>;
+      const raw = String(o['raw'] ?? o['法条'] ?? '');
+      return {
+        raw,
+        category: (o['category'] as LegalBasisItem['category']) ?? classifyLawCategory(raw),
+        article: o['article'] ? String(o['article']) : extractArticleNumber(raw),
+        articleText: o['articleText'] ? String(o['articleText']) : undefined,
+      };
+    });
+  }
+  // fallback: 字符串数组
+  if (Array.isArray(fallback)) {
+    return fallback.filter((s) => typeof s === 'string' && s.length > 0).map((s) => {
+      const raw = String(s);
+      return {
+        raw,
+        category: classifyLawCategory(raw),
+        article: extractArticleNumber(raw),
+      };
+    });
+  }
+  return [];
+}
+
+function classifyLawCategory(raw: string): LegalBasisItem['category'] {
+  if (/民法典/.test(raw)) return '民法典';
+  if (/民诉法|民事诉讼法/.test(raw)) return '民诉法';
+  if (/最高法|最高人民法院|司法解释|解答|规定/.test(raw)) return '司法解释';
+  return '其他';
+}
+
+function extractArticleNumber(raw: string): string | undefined {
+  // 匹配 "第xxx条" 中的 xxx (数字或汉字)
+  const m = raw.match(/第([零一二三四五六七八九十百千\d]+)条/);
+  if (!m || !m[1]) return undefined;
+  return m[1];
+}
+
+/**
  * 关键词抽取 — 不调 LLM, 粗糙但可用
  */
 function extractByKeywords(text: string, source: string): ComplaintAnalysis {
@@ -333,7 +407,15 @@ function extractByKeywords(text: string, source: string): ComplaintAnalysis {
   const evidence = extractEvidence(text);
 
   // 法条抽取
-  const legalBasis = extractLegalBasis(text);
+  const legalBasisRaw = extractLegalBasis(text);
+  const legalBasisItems = legalBasisRaw.map((raw) => ({
+    raw,
+    category: classifyLawCategory(raw) as LegalBasisItem['category'],
+    article: extractArticleNumber(raw),
+  }));
+
+  // 起诉法院抽取
+  const courtOfFiling = extractCourtOfFiling(text);
 
   // 元素评分 (粗略)
   const elementScore = estimateElementScore(text, facts);
@@ -353,12 +435,33 @@ function extractByKeywords(text: string, source: string): ComplaintAnalysis {
     claims,
     facts,
     evidence,
-    legalBasis,
+    legalBasis: legalBasisRaw,
+    legalBasisItems,
     elementScore,
     rebuttalPriority,
     confidence: 0.3,
     warnings,
+    courtOfFiling,
   };
+}
+
+/**
+ * 抽取起诉法院 — "此致" 后面或单独 "向 XX 法院 提起诉讼"
+ */
+function extractCourtOfFiling(text: string): string | undefined {
+  // 1) "此致\n\nXX 法院" / "此致 XX 法院"
+  let m = text.match(/此致\s*\n?\s*([^\n]+人民法院)/);
+  if (m && m[1]) return m[1].trim();
+
+  // 2) "向 XX 法院 提起诉讼"
+  m = text.match(/向\s*([^\n。]+?人民法院)\s*提起/);
+  if (m && m[1]) return m[1].trim();
+
+  // 3) 单独的 "XX 人民法院" 出现在正文末尾
+  const matches = text.match(/[\u4e00-\u9fa5]{2,30}人民法院/g);
+  if (matches && matches.length > 0) return matches[matches.length - 1]!.trim();
+
+  return undefined;
 }
 
 function extractName(text: string, role: string): string {
@@ -450,13 +553,32 @@ function extractEvidence(text: string): ParsedEvidence[] {
   while ((m = re.exec(section)) !== null && idx < 30) {
     idx++;
     if (!m[1] || !m[2]) continue;
-    const name = m[2].trim().slice(0, 50);
+    const fullText = m[2].trim();
+    const name = fullText.slice(0, 50);
     if (name.length < 2) continue;
+
+    // 提取来源: "出自 XX" / "来源: XX" / "XX公证处" / "XX公司"
+    const sourceMatch = fullText.match(/(?:来源|出自|由|系)[:：]?\s*([^\n,，;；]{2,30})/) ||
+                        fullText.match(/([\u4e00-\u9fa5]{2,15}(?:公证处|人民法院|公司|医院|律师事务所))/);
+    const source = sourceMatch && sourceMatch[1] ? sourceMatch[1].trim() : undefined;
+
+    // 提取时间: 2025-06-02 / 2025年6月2日
+    const dateMatch = fullText.match(/(\d{4})[-年](\d{1,2})[-月](\d{1,2})/);
+    const acquiredAt = dateMatch ? `${dateMatch[1]}-${dateMatch[2]!.padStart(2, '0')}-${dateMatch[3]!.padStart(2, '0')}` : undefined;
+
+    // 公证检测
+    const notarized = /公证书|公证[处局]|经.*?公证/.test(fullText);
+    const notaryInfo = fullText.match(/(.{0,10}公证(?:处|局|员)?[，,]?\s*公证书?[号码字]?[为]?\s*[\d零一二三四五六七八九]+)/)?.[0];
+
     items.push({
       index: idx,
       name,
       kind: guessKind(name),
       purpose: '',
+      source,
+      acquiredAt,
+      notarized,
+      notaryInfo,
     });
   }
   return items;

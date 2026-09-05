@@ -49,6 +49,13 @@ export interface ParsedEvidence {
   kind: string;
   /** 证明目的 */
   purpose: string;
+  /** 来源/出处 */
+  source?: string;
+  /** 取得时间 */
+  acquiredAt?: string;
+  /** 公证/鉴定信息 */
+  notarized?: boolean;
+  notaryInfo?: string;
 }
 
 export interface ParsedFacts {
@@ -84,6 +91,18 @@ export interface CaseReference {
   applicableWhen: string;
 }
 
+/** 引用法条的完整信息 (扩字段 C) */
+export interface LegalBasisItem {
+  /** 法条原文 (e.g. "民法典第一千零二十四条") */
+  raw: string;
+  /** 法条类别: 民法典 / 民诉法 / 司法解释 / 其他 */
+  category: '民法典' | '民诉法' | '司法解释' | '其他';
+  /** 解析后的条款号 (e.g. "1024") */
+  article?: string;
+  /** 涉及法条原文 (AI 模式下抽取, draft 模式为空) */
+  articleText?: string;
+}
+
 /** 拆解完整结果 */
 export interface ComplaintAnalysis {
   /** 拆解来源 (起诉状文件路径) */
@@ -102,8 +121,10 @@ export interface ComplaintAnalysis {
   facts: ParsedFacts;
   /** 证据 */
   evidence: ParsedEvidence[];
-  /** 法律依据 */
+  /** 法律依据 — 字符串列表 (旧字段, 向后兼容) */
   legalBasis: string[];
+  /** 法律依据 — 结构化 (扩字段 C) */
+  legalBasisItems: LegalBasisItem[];
   /** 4 要件评分 (用于反驳策略选择) */
   elementScore: ElementScore;
   /** 诉请反驳优先级 (claim index 列表, 从高到低) */
@@ -114,6 +135,10 @@ export interface ComplaintAnalysis {
   warnings: string[];
   /** 类案参考 (Step 2 填入) */
   caseReferences?: CaseReference[];
+  /** 起诉法院 (扩字段 C) */
+  courtOfFiling?: string;
+  /** 案号 (扩字段 C, 通常起诉状不含) */
+  caseNumber?: string;
 }
 
 /** 拆解选项 */

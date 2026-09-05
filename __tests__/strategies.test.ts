@@ -28,6 +28,7 @@ function mkAnalysis(overrides: Partial<ComplaintAnalysis> = {}): ComplaintAnalys
     facts: { tortMethod: '微博', tortContent: '测试内容', spread: '' },
     evidence: [],
     legalBasis: ['民法典第 1024 条'],
+    legalBasisItems: [{ raw: '民法典第 1024 条', category: '民法典', article: '1024' }],
     elementScore: { factAuthenticity: 'unknown', directedness: 'medium', fault: 'unknown', damage: 'weak' },
     rebuttalPriority: [1, 2, 3, 4],
     confidence: 0.5,

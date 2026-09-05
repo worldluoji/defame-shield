@@ -23,6 +23,7 @@ import { caseNewCommand, caseListCommand, caseShowCommand } from './commands/cas
 import { generateCommand } from './commands/generate.js';
 import { analyzeComplaintCommand } from './commands/analyze.js';
 import { selfCheckCommand } from './commands/self-check.js';
+import { fillDefenseCommand } from './commands/fill-defense.js';
 import { out } from './utils/console.js';
 
 loadEnvFile();
@@ -65,6 +66,12 @@ analyzeCmd
   .option('--silent', '静默模式, 不输出 JSON 内容', false)
   .option('--extra <text>', '给 LLM 的额外指令')
   .action(analyzeComplaintCommand);
+
+const fillCmd = program.command('fill-defense <file>').description('交互式填充答辩状中的 [待补充] 占位符');
+fillCmd
+  .option('--yes', '跳过确认, 直接开始', false)
+  .option('--out <path>', '输出路径 (默认: <原名>-filled.md)')
+  .action(fillDefenseCommand);
 
 const selfCheckCmd = program.command('self-check <defense>').description('抗辩自检 — 模拟原告律师找漏洞');
 selfCheckCmd

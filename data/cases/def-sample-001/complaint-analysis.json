@@ -1,6 +1,6 @@
 {
   "source": "data/cases/sample-001/complaint.md",
-  "analyzedAt": "2026-09-05T14:58:49.318Z",
+  "analyzedAt": "2026-09-05T15:11:04.792Z",
   "mode": "draft",
   "parties": {
     "原告": {
@@ -53,6 +53,22 @@
     "《中华人民共和国民法典》第一千零二十五条",
     "最高人民法院关于审理名誉权案件若干问题的解答"
   ],
+  "legalBasisItems": [
+    {
+      "raw": "《中华人民共和国民法典》第一千零二十四条",
+      "category": "民法典",
+      "article": "一千零二十四"
+    },
+    {
+      "raw": "《中华人民共和国民法典》第一千零二十五条",
+      "category": "民法典",
+      "article": "一千零二十五"
+    },
+    {
+      "raw": "最高人民法院关于审理名誉权案件若干问题的解答",
+      "category": "司法解释"
+    }
+  ],
   "elementScore": {
     "factAuthenticity": "disputed",
     "directedness": "medium",
@@ -67,5 +83,6 @@
     5
   ],
   "confidence": 0.3,
-  "warnings": []
+  "warnings": [],
+  "courtOfFiling": "北京市朝阳区人民法院"
 }
