@@ -1,0 +1,13 @@
+# defame-shield Python 依赖 (MarkItDown)
+#
+# MarkItDown 是微软开源的 PDF/Word/PPT/Excel → Markdown 转换工具
+# https://github.com/microsoft/markitdown
+#
+# 必需: pip install 'markitdown[pdf,docx]'  (推荐)
+# 全功能 (含 OCR/音频/YouTube): pip install 'markitdown[all]'
+# macOS brew: brew install markitdown (需要 tap)
+#
+# Python 3.10+ 必需
+
+# 核心 (PDF + Word)
+markitdown[pdf,docx]>=0.1.0a1
