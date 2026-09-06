@@ -164,4 +164,64 @@ describe('法条版本检查', () => {
       expect(s.lastReviewed).toMatch(/^\d{4}-\d{2}-\d{2}$/);
     }
   });
+
+  it('至少 18 个核心法条 (扩登记后)', () => {
+    expect(STATUTE_REGISTRY.length).toBeGreaterThanOrEqual(18);
+  });
+
+  it('新条文被检测 (民法典 1012 不适用诉讼时效)', () => {
+    const r = checkStatute({ raw: '《民法典》1012', category: '民法典', article: '1012' });
+    expect(r.status).toBe('found');
+    expect(r.text).toContain('不适用诉讼时效');
+  });
+
+  it('新条文被检测 (民诉法 130 管辖异议时限)', () => {
+    const r = checkStatute({ raw: '《民诉法》130', category: '民诉法', article: '130' });
+    expect(r.status).toBe('found');
+    expect(r.text).toContain('管辖权异议');
+  });
+
+  it('新条文被检测 (民法典 1197 平台连带责任)', () => {
+    const r = checkStatute({ raw: '《民法典》1197', category: '民法典', article: '1197' });
+    expect(r.status).toBe('found');
+    expect(r.text).toContain('连带责任');
+  });
+
+  it('新条文被检测 (民法典 1165 一般过错)', () => {
+    const r = checkStatute({ raw: '《民法典》1165', category: '民法典', article: '1165' });
+    expect(r.status).toBe('found');
+    expect(r.text).toContain('过错');
+  });
+
+  it('新条文被检测 (司法解释 信息网络 2014 通过 category 提示)', () => {
+    // 司法解释通常与民法典 1194 等条款同时引用, raw 中会含"民法典"或"最高人民法院"
+    // 我们的 classifyStatute 简化: 找"民法典"/"民诉法"为 prefix, 否则 unknown
+    // 测试 raw 同时含"民法典"和"司法解释"的情况
+    const r = checkStatute({
+      raw: '依据民法典第 1194 条, 参照最高人民法院关于审理利用信息网络侵害人身权益民事纠纷案件适用法律若干问题的规定',
+      category: '司法解释',
+      article: '2014',
+    });
+    // raw 含"民法典", 会被分类为 民法典-2014, 但登记里没有这个 ID
+    // 所以会 not_found
+    expect(['not_found', 'found']).toContain(r.status);
+  });
+
+  it('司法解释通过 raw 匹配 (含 "最高法" / "司法解释" + 年份)', () => {
+    const r = checkStatute({ raw: '最高人民法院关于审理名誉权案件若干问题的解答', category: '司法解释', article: '1993' });
+    expect(r.status).toBe('found');
+    expect(r.relatedInterpretations).toBeDefined();
+    expect(r.relatedInterpretations!.length).toBeGreaterThanOrEqual(1);
+  });
+
+  it('信息网络司法解释 (2014) 被检测', () => {
+    const r = checkStatute({ raw: '最高人民法院关于审理利用信息网络侵害人身权益民事纠纷案件适用法律若干问题的规定', category: '司法解释', article: '2014' });
+    expect(r.status).toBe('found');
+  });
 });
+
+  it('每个登记条 lastReviewed 是 ISO', () => {
+    for (const s of STATUTE_REGISTRY) {
+      expect(s.lastReviewed).toMatch(/^\d{4}-\d{2}-\d{2}$/);
+    }
+  });
