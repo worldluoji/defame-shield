@@ -26,6 +26,7 @@ import { selfCheckCommand } from './commands/self-check.js';
 import { fillDefenseCommand } from './commands/fill-defense.js';
 import { exportPdfCommand } from './commands/export-pdf.js';
 import { applyFixesCommand } from './commands/apply-fixes.js';
+import { simulateCommand } from './commands/simulate.js';
 import { out } from './utils/console.js';
 
 loadEnvFile();
@@ -82,6 +83,16 @@ applyCmd
   .option('--critical-only', '仅注入 critical 风险', false)
   .option('--vulnerabilities <json>', '使用已有漏洞列表, 跳过 self-check')
   .action(applyFixesCommand);
+
+const simCmd = program.command('simulate <defense>').description('攻防推演 — 模拟原/被告多轮交锋, 评估胜诉概率轨迹');
+simCmd
+  .requiredOption('--analysis <json>', '拆解结果 JSON 路径')
+  .option('--case <id>', '本地案件 ID (提供更准确的被告信息)')
+  .option('--rounds <n>', '推演轮数 (默认 3)', '3')
+  .option('--mode <mode>', '模式: rule | ai (默认 rule)', 'rule')
+  .option('--provider <provider>', 'LLM provider')
+  .option('--out <path>', '输出 JSON 路径')
+  .action(simulateCommand);
 
 const exportCmd = program.command('export-pdf <file>').description('Markdown → PDF 转换 (中国法院文书排版)');
 exportCmd
