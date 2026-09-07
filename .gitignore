@@ -1,3 +1,11 @@
+# Python (markitdown)
+.venv/
+venv/
+__pycache__/
+*.pyc
+*.pyo
+.python-version
+
 # dependencies
 node_modules/
 

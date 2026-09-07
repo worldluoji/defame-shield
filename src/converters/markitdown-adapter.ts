@@ -13,7 +13,9 @@
  */
 
 import { spawn, spawnSync } from 'node:child_process';
-import { existsSync } from 'node:fs';
+import { existsSync, mkdtempSync, readFileSync, rmSync } from 'node:fs';
+import { homedir, tmpdir } from 'node:os';
+import { join } from 'node:path';
 
 export interface MarkItDownOptions {
   /** 超时 ms, 默认 60s */
@@ -39,14 +41,52 @@ export interface MarkItDownError {
 
 export type MarkItDownResult = MarkItDownSuccess | MarkItDownError;
 
-/** 检查 markitdown 是否已安装 */
+/** 检查 markitdown 是否已安装 — 多级查找
+ *  1. `which markitdown` (PATH)
+ *  2. `<cwd>/.venv/bin/markitdown` (项目本地 uv venv)
+ *  3. `<cwd>/venv/bin/markitdown` (项目本地 venv)
+ *  4. `~/.venvs/defame-shield/bin/markitdown` (集中 venv)
+ *  5. `~/Library/Caches/markitdown` (macOS 缓存, 备用)
+ */
 export function isMarkItDownInstalled(): boolean {
-  try {
-    const which = spawnSync('which', ['markitdown'], { stdio: 'ignore' });
-    return which.status === 0;
-  } catch {
-    return false;
+  for (const p of findMarkItDownBinaries()) {
+    try {
+      if (existsSync(p)) return true;
+    } catch {
+      // ignore
+    }
   }
+  return false;
+}
+
+/** 返回所有可能的 markitdown 路径 (按优先级) */
+function findMarkItDownBinaries(): string[] {
+  const candidates: string[] = [];
+  const cwd = process.cwd();
+  // 1) which PATH 查找
+  try {
+    const which = spawnSync('which', ['markitdown'], { stdio: 'pipe' });
+    if (which.status === 0 && which.stdout) {
+      candidates.push(which.stdout.toString().trim());
+    }
+  } catch {
+    // ignore
+  }
+  // 2) 项目本地 .venv (uv 标准)
+  candidates.push(join(cwd, '.venv', 'bin', 'markitdown'));
+  // 3) 项目本地 venv
+  candidates.push(join(cwd, 'venv', 'bin', 'markitdown'));
+  // 4) 集中 venv
+  candidates.push(join(homedir(), '.venvs', 'defame-shield', 'bin', 'markitdown'));
+  return candidates;
+}
+
+/** 找第一个存在的 markitdown 路径, 用于 spawn */
+function findMarkItDownPath(): string | null {
+  for (const p of findMarkItDownBinaries()) {
+    if (existsSync(p)) return p;
+  }
+  return null;
 }
 
 /** 安装提示 */
@@ -68,15 +108,29 @@ export async function convertWithMarkItDown(
     return { ok: false, error: `文件不存在: ${filePath}`, code: 'spawn_error' };
   }
 
-  const args = [filePath, '-o', '-']; // 输出到 stdout
+  // markitdown 0.1.8b1 不支持 "-o -" 输出到 stdout, 用临时文件
+  const tmpDir = mkdtempSync(join(tmpdir(), 'dsh-markitdown-'));
+  const tmpOutput = join(tmpDir, 'output.md');
+  const args = [filePath, '-o', tmpOutput];
   if (opts.enablePlugins) args.push('--use-plugins');
   if (opts.docintelEndpoint) args.push('-d', '-e', opts.docintelEndpoint);
+
+  // 优先用 findMarkItDownPath() 找本地 .venv 的二进制
+  const markitdownBin = findMarkItDownPath();
+  if (!markitdownBin) {
+    return {
+      ok: false,
+      error: 'markitdown 命令未找到',
+      code: 'not_installed',
+      stderr: MARKITDOWN_INSTALL_HINT,
+    };
+  }
 
   const start = Date.now();
   const timeoutMs = opts.timeoutMs ?? 60_000;
 
   return new Promise((resolve) => {
-    const child = spawn('markitdown', args, { stdio: ['ignore', 'pipe', 'pipe'] });
+    const child = spawn(markitdownBin, args, { stdio: ['ignore', 'pipe', 'pipe'] });
     let stdout = '';
     let stderr = '';
     let killed = false;
@@ -116,6 +170,7 @@ export async function convertWithMarkItDown(
       clearTimeout(timer);
       const durationMs = Date.now() - start;
       if (killed) {
+        cleanupTmp(tmpDir);
         resolve({
           ok: false,
           error: `markitdown 超时 (${timeoutMs}ms), 已 kill`,
@@ -125,6 +180,7 @@ export async function convertWithMarkItDown(
         return;
       }
       if (code !== 0) {
+        cleanupTmp(tmpDir);
         resolve({
           ok: false,
           error: `markitdown 退出码 ${code}`,
@@ -133,7 +189,22 @@ export async function convertWithMarkItDown(
         });
         return;
       }
-      if (!stdout.trim()) {
+      // 读临时文件
+      let markdown = '';
+      try {
+        markdown = readFileSync(tmpOutput, 'utf-8');
+      } catch (e) {
+        cleanupTmp(tmpDir);
+        resolve({
+          ok: false,
+          error: `markitdown 退出成功但读取输出文件失败: ${(e as Error).message}`,
+          code: 'no_output',
+          stderr,
+        });
+        return;
+      }
+      cleanupTmp(tmpDir);
+      if (!markdown.trim()) {
         resolve({
           ok: false,
           error: 'markitdown 转换成功但输出为空',
@@ -142,7 +213,16 @@ export async function convertWithMarkItDown(
         });
         return;
       }
-      resolve({ ok: true, markdown: stdout, durationMs });
+      resolve({ ok: true, markdown, durationMs });
     });
   });
+}
+
+/** 清理临时目录 */
+function cleanupTmp(dir: string): void {
+  try {
+    rmSync(dir, { recursive: true, force: true });
+  } catch {
+    // ignore
+  }
 }
