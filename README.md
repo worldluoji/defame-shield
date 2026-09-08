@@ -98,6 +98,8 @@ dsh generate evidence-list --case sample-001
 
 工具会根据起诉状拆解结果,自动选 1-3 个最适反点,并为每条诉请匹配最适反点。
 
+> 另有 3 个**一票否决**程序性反点 (超过诉讼时效 / 管辖异议 / 被告主体不适格),优先于实体反点,共 8 个反点参与自动选择。
+
 ## 命令一览
 
 ```
@@ -107,9 +109,15 @@ dsh config set <key> <value>                        修改配置
 dsh case new <id>                                   创建案件
 dsh case list                                       列出案件
 dsh case show <id>                                  查看案件详情
+dsh convert <file>                                  PDF/Word/PPT/Excel → markdown (需 MarkItDown)
 dsh analyze-complaint <file> --case <id> [--draft]  拆解起诉状 → JSON
 dsh generate <type> --case <id> [--draft]          生成文书
   └─ defense: --from-analysis <json> 必填
+dsh self-check <defense> --analysis <json>         抗辩自检, 模拟原告找漏洞 (rule/ai/hybrid)
+dsh apply-fixes <defense> --analysis <json>        自检修补建议自动注入答辩状
+dsh fill-defense <file>                             交互式填充 [待补充] 占位符
+dsh simulate <defense> --analysis <json>            攻防推演, 多轮交锋 + 胜诉概率轨迹
+dsh export-pdf <file>                               markdown → PDF (法院文书排版)
 ```
 
 ## 目录结构
@@ -121,13 +129,15 @@ defame-shield/
 │   ├── cli.ts            commander 命令注册
 │   ├── commands/         子命令: init/config/case/analyze/generate
 │   ├── analyzer/         起诉状拆解器 (LLM + draft)
-│   ├── rebuttal/         5 个反点策略库 + 选择器
+│   ├── rebuttal/         8 个反点策略库 (5 实体 + 3 程序) + 自检/攻防推演
 │   ├── generators/       文书生成器 (含基于拆解的答辩 v2)
+│   ├── converters/       文档转换 (MarkItDown 适配)
+│   ├── data/             法条登记 (23 条 + 司法解释, 离线时效检查)
 │   ├── case/             案件数据结构 + CRUD
 │   ├── config/           dsh.config.json + .env 解析
 │   ├── llm/              LLM 客户端 (deepseek/minimax)
 │   ├── templates/        4 个 Markdown 模板
-│   └── utils/            工具函数
+│   └── utils/            工具函数 (PDF 导出 / 占位符等)
 ├── data/
 │   └── cases/
 │       └── <case-id>/
@@ -135,8 +145,9 @@ defame-shield/
 │           ├── complaint.md          (原告起诉状 markdown, 被告视角时存)
 │           ├── complaint-analysis.json (拆解结果)
 │           └── outputs/              生成的文书
-├── docs/                 法律免责声明 + todo (方向 1/4/5)
-├── __tests__/            41 个单元测试
+├── docs/                 法律免责声明 + 答辩工作流 + todo (方向 1/4/5)
+├── scripts/              setup.sh (一键装 Node + uv venv + markitdown)
+├── __tests__/            111 个单元测试
 ├── .env.example
 ├── dsh.config.json       (init 时生成)
 └── package.json
@@ -152,7 +163,7 @@ defame-shield/
 ## 调试
 
 ```bash
-# 单元测试 (41 个, < 1s)
+# 单元测试 (111 个, < 1s)
 pnpm test
 
 # 类型检查
