@@ -41,3 +41,6 @@ yarn-error.log*
 # coverage
 coverage/
 .nyc_output/
+
+.claude/settings.local.json
+.claude/.claude-model-switch-active.json
