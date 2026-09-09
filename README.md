@@ -21,9 +21,9 @@
 
 ```bash
 cd defame-shield          # 本仓库根目录
-pnpm setup                # pnpm ≥8 首次需配置全局 bin 目录 (写入 ~/.zshrc, 之后新开终端生效)
+pnpm setup                # pnpm 首次需配置全局 bin 目录 (写入 ~/.zshrc, 之后新开终端生效)
 pnpm install
-pnpm link --global        # 全局注册 dsh (也可用 npm link)
+pnpm add -g .             # 全局注册 dsh (pnpm 11; pnpm ≤10 用 pnpm link --global, 也可用 npm link)
 dsh --help                # 验证
 ```
 
