@@ -13,7 +13,7 @@
     "test": "vitest run",
     "test:watch": "vitest",
     "typecheck": "tsc --noEmit",
-    "lint": "eslint src/ bin/",
+    "lint": "eslint src/ bin/ scripts/ --ext .ts,.mjs,.js",
     "build": "tsc -p tsconfig.build.json"
   },
   "keywords": [
@@ -29,7 +29,6 @@
     "node": ">=18.17"
   },
   "dependencies": {
-    "@types/pdfkit": "^0.17.6",
     "chalk": "^5.3.0",
     "commander": "^12.1.0",
     "inquirer": "^9.3.7",
@@ -39,6 +38,7 @@
   "devDependencies": {
     "@types/inquirer": "^9.0.7",
     "@types/node": "^20.14.0",
+    "@types/pdfkit": "^0.17.6",
     "@typescript-eslint/eslint-plugin": "^7.18.0",
     "@typescript-eslint/parser": "^7.18.0",
     "eslint": "^8.57.0",

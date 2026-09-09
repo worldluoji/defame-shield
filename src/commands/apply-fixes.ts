@@ -8,9 +8,9 @@
 import { readFileSync, writeFileSync, existsSync, mkdirSync } from 'node:fs';
 import { dirname, basename, join } from 'node:path';
 import { selfCheckDefense, applyFixes, type Vulnerability } from '../rebuttal/self-check.js';
-import { loadConfig } from '../config/config.js';
-import { loadCase } from '../case/case.js';
 import { out, die } from '../utils/console.js';
+import { readJsonFile } from '../utils/json.js';
+import type { ComplaintAnalysis } from '../analyzer/complaint-types.js';
 
 export interface ApplyFixesFlags {
   analysis: string;
@@ -26,12 +26,12 @@ export async function applyFixesCommand(defensePath: string, flags: ApplyFixesFl
   if (!existsSync(flags.analysis)) die(`拆解结果文件不存在: ${flags.analysis}`);
 
   const defense = readFileSync(defensePath, 'utf-8');
-  const analysis = JSON.parse(readFileSync(flags.analysis, 'utf-8'));
+  const analysis = readJsonFile<ComplaintAnalysis>(flags.analysis);
 
   // 1. 跑自检 (除非用户直接传漏洞列表)
   let vulns: Vulnerability[];
   if (flags.vulnerabilities && existsSync(flags.vulnerabilities)) {
-    vulns = JSON.parse(readFileSync(flags.vulnerabilities, 'utf-8')) as Vulnerability[];
+    vulns = readJsonFile<Vulnerability[]>(flags.vulnerabilities);
     out.info(`使用已有漏洞列表: ${flags.vulnerabilities} (${vulns.length} 个)`);
   } else {
     out.info(`自检 + 注入: ${basename(defensePath)}  /  模式: rule`);
@@ -42,17 +42,11 @@ export async function applyFixesCommand(defensePath: string, flags: ApplyFixesFl
     out.info(`自检: ${result.vulnerabilities.length} 个漏洞,  注入: ${vulns.length} 个 (criticalOnly=${flags.criticalOnly ?? false})`);
   }
 
-  // 2. 找案件信息
-  const config = loadConfig();
-  const caseId = (analysis.parties?.被告?.name ?? '').replace(/\s/g, '-').toLowerCase() || 'default';
-  const c = flags.analysis.includes('def-sample-001')
-    ? loadCase(config, 'def-sample-001')
-    : null;
-
+  // 2. 案件信息取自拆解结果 (无 --case 关联, 缺失时用中性称谓)
   // 3. 注入修补
   const result = applyFixes(defense, vulns, analysis, {
-    caseName: c?.title ?? '',
-    defendantName: c?.defendant.name ?? analysis.parties.被告.name ?? '被告',
+    caseName: analysis.cause ?? '',
+    defendantName: analysis.parties?.被告?.name ?? '被告',
   });
 
   // 4. 写文件

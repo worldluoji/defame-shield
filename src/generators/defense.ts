@@ -243,16 +243,15 @@ ${c.lawyer?.name ?? ''}
  */
 function renderClaimRebuttal(claim: ParsedClaim, strategy: RebuttalStrategy, context: { analysis: ComplaintAnalysis; case: Case }): string {
   const amountStr = claim.amount ? `（${claim.amount.toLocaleString('zh-CN')} 元）` : '';
-  // 程序性反点模板里的 {placeholder} 替换为可读形式
-  const today = new Date().toISOString().slice(0, 10);
-  const tortTime = context.analysis.facts.time ?? '__________';
-  const filingTime = today;
+  // 程序性反点模板里的 {placeholder} 替换为可读形式; 未知的一律留横线, 不虚构
+  const tortTime = context.analysis.facts.time || '__________';
+  const filingTime = '__________';
   const elapsed = '__________';
-  const defendantAddress = context.case.defendant.address ?? '__________';
-  const court = context.case.court ?? '__________';
-  const platform = context.analysis.facts.place ?? context.analysis.facts.tortMethod ?? '__________';
+  const defendantAddress = context.case.defendant.address || '__________';
+  const court = context.case.court || '__________';
+  const platform = context.analysis.facts.place || context.analysis.facts.tortMethod || '__________';
 
-  let template = strategy.template
+  const template = strategy.template
     .replace(/\{tortTime\}/g, tortTime)
     .replace(/\{filingTime\}/g, filingTime)
     .replace(/\{elapsed\}/g, elapsed)
@@ -324,7 +323,7 @@ function buildDefensePrompts(
   draftText: string,
   opts: DefenseGenerateOpts,
   strategies: RebuttalStrategy[],
-  caseRefs: CaseReference[],
+  _caseRefs: CaseReference[],
 ): Array<{ role: 'system' | 'user'; content: string }> {
   const system = `你是一名中国民事诉讼律师, 专长名誉权纠纷案件的**被告应诉**工作。
 

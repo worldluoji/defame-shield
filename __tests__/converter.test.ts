@@ -4,7 +4,7 @@
  * 注意: 真实 markitdown 调用依赖系统 Python 环境, 这里用 mock 测转换器逻辑
  */
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
-import { writeFileSync, mkdirSync, existsSync, readFileSync, unlinkSync, rmSync } from 'node:fs';
+import { writeFileSync, mkdirSync, existsSync, readFileSync, readdirSync, unlinkSync, rmSync } from 'node:fs';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import { spawn } from 'node:child_process';
@@ -137,10 +137,18 @@ describe('DocumentConverter (passthrough + 缓存)', () => {
     expect(r.error.code).toBe('unsupported_format');
   });
 
-  it('clearCache 清空缓存', () => {
-    const conv = new DocumentConverter({ cacheDir: join(tmpDir, 'cache3') });
+  it('clearCache 清空缓存', async () => {
+    const cacheDir = join(tmpDir, 'cache3');
+    const md = join(tmpDir, 'clear-test.md');
+    writeFileSync(md, '# 清空缓存测试', 'utf-8');
+    const conv = new DocumentConverter({ cacheDir });
+    await conv.convert(md); // passthrough 结果写入缓存
+    const before = readdirSync(cacheDir).filter((f) => f.endsWith('.md'));
+    expect(before.length).toBeGreaterThanOrEqual(1);
     const result = conv.clearCache();
-    expect(result.removed).toBeGreaterThanOrEqual(0);
+    expect(result.removed).toBe(before.length);
+    const after = readdirSync(cacheDir).filter((f) => f.endsWith('.md'));
+    expect(after).toHaveLength(0);
   });
 });
 
@@ -155,8 +163,9 @@ describe('DocumentConverter (markitdown 调用 — 真实或失败)', () => {
     // 如果装了, 期望 ok=true (但内容可能为空)
     if (!r.ok) {
       expect(['markitdown_not_installed', 'conversion_failed']).toContain(r.error.code);
+    } else {
+      expect(r.result.metadata.converter).toBe('markitdown');
     }
-    // 这个测试只是跑通路径, 不强求成功
   });
 });
 

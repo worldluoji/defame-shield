@@ -9,10 +9,11 @@ import PDFDocument from 'pdfkit';
 import { createWriteStream, existsSync, mkdirSync } from 'node:fs';
 import { dirname } from 'node:path';
 
-/** 中文字体 (macOS 系统字体) */
-const CHINESE_FONT_PATH = '/System/Library/Fonts/STHeiti Light.ttc';
-const CHINESE_FONT_BOLD_PATH = '/System/Library/Fonts/STHeiti Medium.ttc';
-const CHINESE_FONT_INDEX = 0;
+/** PDF 渲染字体对 (中文字体缺失时回退 PDF 内置字体) */
+interface FontPair {
+  regular: string;
+  bold: string;
+}
 
 export interface PdfOptions {
   output: string;
@@ -64,6 +65,9 @@ export async function convertToPdf(mdPath: string, options: PdfOptions): Promise
   } catch {
     // 字体注册失败, fallback 到默认 (PDF 14 base fonts, 中文字符会显示为方块)
   }
+  const fonts: FontPair = useChineseFont
+    ? { regular: 'CN', bold: 'CN-Bold' }
+    : { regular: 'Times-Roman', bold: 'Times-Bold' };
   if (!useChineseFont) {
     // 提示用户安装 Chrome 或指定 CHINESE_TTF 环境变量
     console.warn(
@@ -73,18 +77,18 @@ export async function convertToPdf(mdPath: string, options: PdfOptions): Promise
   }
 
   // 设置默认字体
-  doc.font(useChineseFont ? 'CN' : 'Times-Roman').fontSize(12);
+  doc.font(fonts.regular).fontSize(12);
 
   // 渲染 tokens
   for (const token of tokens) {
-    renderToken(doc, token);
+    renderToken(doc, token, fonts);
   }
 
   // 添加页脚 (页码 + 案号)
   const range = doc.bufferedPageRange();
   for (let i = 0; i < range.count; i++) {
     doc.switchToPage(range.start + i);
-    addFooter(doc, i + 1, range.count, options);
+    addFooter(doc, i + 1, range.count, options, fonts);
   }
 
   doc.end();
@@ -96,7 +100,7 @@ export async function convertToPdf(mdPath: string, options: PdfOptions): Promise
   });
 }
 
-function renderToken(doc: PDFKit.PDFDocument, token: Tokens.Generic): void {
+function renderToken(doc: PDFKit.PDFDocument, token: Tokens.Generic, fonts: FontPair): void {
   switch (token.type) {
     case 'heading': {
       const h = token as Tokens.Heading;
@@ -105,12 +109,12 @@ function renderToken(doc: PDFKit.PDFDocument, token: Tokens.Generic): void {
       doc.moveDown(0.5);
       if (h.depth === 1) {
         // 主标题居中加粗
-        doc.font('CN-Bold').fontSize(size).text(h.text, { align: 'center' });
+        doc.font(fonts.bold).fontSize(size).text(h.text, { align: 'center' });
       } else {
-        doc.font('CN-Bold').fontSize(size).text(h.text, { align: 'left' });
+        doc.font(fonts.bold).fontSize(size).text(h.text, { align: 'left' });
       }
       doc.moveDown(0.3);
-      doc.font('CN').fontSize(12);
+      doc.font(fonts.regular).fontSize(12);
       break;
     }
 
@@ -132,7 +136,7 @@ function renderToken(doc: PDFKit.PDFDocument, token: Tokens.Generic): void {
 
     case 'list': {
       const list = token as Tokens.List;
-      doc.font('CN').fontSize(12);
+      doc.font(fonts.regular).fontSize(12);
       list.items.forEach((item, i) => {
         const marker = list.ordered ? `${i + 1}.` : '•';
         const text = item.text.replace(/\n/g, ' ');
@@ -147,12 +151,12 @@ function renderToken(doc: PDFKit.PDFDocument, token: Tokens.Generic): void {
       // 简化为文本输出
       const colWidth = (doc.page.width - 144) / Math.max(table.header.length, 1);
       table.header.forEach((cell, i) => {
-        doc.font('CN-Bold').fontSize(11).text(cell.text, {
+        doc.font(fonts.bold).fontSize(11).text(cell.text, {
           width: colWidth,
           continued: i < table.header.length - 1,
         });
       });
-      doc.font('CN').fontSize(11);
+      doc.font(fonts.regular).fontSize(11);
       for (const row of table.rows) {
         row.forEach((cell, i) => {
           doc.text(cell.text, {
@@ -163,7 +167,7 @@ function renderToken(doc: PDFKit.PDFDocument, token: Tokens.Generic): void {
         doc.moveDown(0.2);
       }
       doc.moveDown(0.3);
-      doc.font('CN').fontSize(12);
+      doc.font(fonts.regular).fontSize(12);
       break;
     }
 
@@ -177,7 +181,7 @@ function renderToken(doc: PDFKit.PDFDocument, token: Tokens.Generic): void {
       const c = token as Tokens.Code;
       doc.font('Courier').fontSize(10);
       doc.text(c.text, { indent: 24, align: 'left' });
-      doc.font('CN').fontSize(12);
+      doc.font(fonts.regular).fontSize(12);
       doc.moveDown(0.3);
       break;
     }
@@ -192,9 +196,9 @@ function renderToken(doc: PDFKit.PDFDocument, token: Tokens.Generic): void {
   }
 }
 
-function addFooter(doc: PDFKit.PDFDocument, pageNum: number, total: number, options: PdfOptions): void {
+function addFooter(doc: PDFKit.PDFDocument, pageNum: number, total: number, options: PdfOptions, fonts: FontPair): void {
   const footerY = doc.page.height - 50;
-  doc.font('CN').fontSize(9).fillColor('#666');
+  doc.font(fonts.regular).fontSize(9).fillColor('#666');
 
   // 案号 (左侧)
   if (options.caseNumber) {

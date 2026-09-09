@@ -99,13 +99,16 @@ describe('selfCheckDefense (rule 模式)', () => {
     expect(r.vulnerabilities.some((v) => v.id === 'missing-statute-limitations' && v.risk === 'critical')).toBe(true);
   });
 
-  it('评分与漏洞数成反比', async () => {
+  it('完整答辩评分高于空壳答辩 (评分有区分度)', async () => {
     const a = await analyzeComplaint(SAMPLE_COMPLAINT, { draft: true });
     if (!a.ok) throw new Error('analyze fail');
     const defense = await genDefense(a.analysis);
-    const r = await selfCheckDefense({ defense, analysis: a.analysis, mode: 'rule' });
-    expect(r.overallScore).toBeGreaterThanOrEqual(0);
-    expect(r.overallScore).toBeLessThanOrEqual(100);
+    const full = await selfCheckDefense({ defense, analysis: a.analysis, mode: 'rule' });
+    expect(full.overallScore).toBeGreaterThanOrEqual(0);
+    expect(full.overallScore).toBeLessThanOrEqual(100);
+
+    const broken = await selfCheckDefense({ defense: '这是答辩状。', analysis: a.analysis, mode: 'rule' });
+    expect(full.overallScore).toBeGreaterThan(broken.overallScore);
   });
 
   it('漏洞按风险等级排序', async () => {

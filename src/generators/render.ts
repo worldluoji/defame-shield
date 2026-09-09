@@ -80,18 +80,25 @@ function escapeMd(s: string): string {
 }
 
 /**
- * 替换模板中的 {{ key }} 或 {{ key.path }}
- * - 字符串空值/未找到 → 渲染为 `__________` (法律文书占位惯例)
- * - 仅当 rawKey 包含中文"待补"或显式未定义字段, 才保持原样
+ * 替换模板中的 {{ key }} / {{ key.path }} / {{ key || 默认值 }}
+ * - 字符串空值/未找到 → 用 `||` 后的默认值, 无默认值则渲染为 `__________` (法律文书占位惯例)
  * - 对象/数组用 JSON.stringify
  */
 export function renderTemplate(template: string, vars: TemplateVars): string {
   return template.replace(/\{\{\s*([^}]+?)\s*\}\}/g, (_match, rawKey: string) => {
-    const value = resolveKey(vars, rawKey);
-    if (value === undefined || value === null) return '__________';
+    const pipeIdx = rawKey.indexOf('||');
+    const key = (pipeIdx >= 0 ? rawKey.slice(0, pipeIdx) : rawKey).trim();
+    let fallback: string | undefined;
+    if (pipeIdx >= 0) {
+      const raw = rawKey.slice(pipeIdx + 2).trim();
+      const quoted = raw.match(/^(['"])(.*)\1$/);
+      fallback = quoted ? quoted[2] : raw;
+    }
+    const value = resolveKey(vars, key);
+    if (value === undefined || value === null) return fallback ?? '__________';
     if (typeof value === 'string') {
       const trimmed = value.trim();
-      if (trimmed === '') return '__________';
+      if (trimmed === '') return fallback ?? '__________';
       return trimmed;
     }
     if (typeof value === 'object') return JSON.stringify(value, null, 2);

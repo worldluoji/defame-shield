@@ -64,10 +64,10 @@ export function detectByMagic(filePath: string): SupportedFormat {
     }
     if (match) {
       // PK 魔数表示 ZIP 容器 (docx/pptx/xlsx)
-      // 用扩展名细分
-      const ext = detectByExt(filePath);
-      if (ext === 'docx' || ext === 'pptx' || ext === 'xlsx') {
-        return ext;
+      // 用扩展名细分; 任意 .zip 不能误报为 docx
+      if (m.format === 'docx') {
+        const ext = detectByExt(filePath);
+        return ext === 'docx' || ext === 'pptx' || ext === 'xlsx' ? ext : 'unsupported';
       }
       return m.format;
     }

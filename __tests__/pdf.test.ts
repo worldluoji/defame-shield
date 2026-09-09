@@ -1,7 +1,7 @@
 /**
  * PDF 转换测试
  */
-import { describe, it, expect } from 'vitest';
+import { describe, it, expect, afterAll } from 'vitest';
 import { existsSync, unlinkSync, readFileSync, statSync } from 'node:fs';
 import { convertToPdf } from '../src/utils/pdf';
 import { tmpdir } from 'node:os';
@@ -45,10 +45,9 @@ describe('convertToPdf', () => {
   it('缺文件报错', async () => {
     await expect(convertToPdf('/no/such/file.md', { output: tmpPdf })).rejects.toThrow();
   });
+});
 
-  // 清理
-  it('cleanup', () => {
-    if (existsSync(tmpFile)) unlinkSync(tmpFile);
-    if (existsSync(tmpPdf)) unlinkSync(tmpPdf);
-  });
+afterAll(() => {
+  if (existsSync(tmpFile)) unlinkSync(tmpFile);
+  if (existsSync(tmpPdf)) unlinkSync(tmpPdf);
 });

@@ -98,7 +98,6 @@ export async function callLLM(
       body: JSON.stringify(body),
       signal: controller.signal,
     });
-    clearTimeout(timer);
 
     if (!res.ok) {
       const text = await res.text();
@@ -130,11 +129,12 @@ export async function callLLM(
       elapsedMs: Date.now() - start,
     };
   } catch (err) {
-    clearTimeout(timer);
     const e = err as Error;
     if (e.name === 'AbortError') {
       return { ok: false, code: 'timeout', provider, error: `LLM call timed out after ${timeoutMs}ms` };
     }
     return { ok: false, code: 'network_error', provider, error: e.message };
+  } finally {
+    clearTimeout(timer);
   }
 }

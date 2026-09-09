@@ -10,7 +10,8 @@ import { out, die } from '../utils/console.js';
 
 export interface ConvertFlags {
   out?: string;
-  noCache?: boolean;
+  /** commander 的 --no-cache 存为 cache: false */
+  cache?: boolean;
   printMeta?: boolean;
   check?: boolean;
 }
@@ -34,9 +35,10 @@ export async function convertCommand(input: string, flags: ConvertFlags): Promis
 
   if (!existsSync(input)) die(`文件不存在: ${input}`);
 
-  out.info(`转换: ${basename(input)}  (缓存: ${flags.noCache ? 'off' : 'on'})`);
+  const useCache = flags.cache !== false;
+  out.info(`转换: ${basename(input)}  (缓存: ${useCache ? 'on' : 'off'})`);
 
-  const result = await converter.convert(input, !flags.noCache);
+  const result = await converter.convert(input, useCache);
 
   if (!result.ok) {
     out.error(result.error.error);

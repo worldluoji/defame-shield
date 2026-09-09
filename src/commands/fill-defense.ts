@@ -73,25 +73,27 @@ export async function fillDefenseCommand(defensePath: string, flags: FillFlags):
       ? `[待补充] 请填写 (输入 '.' 跳过, '!q' 退出):`
       : `[${p.key.slice(0, 20)}] 请填写 (输入 '.' 跳过, '!q' 退出):`;
 
-    const { value } = await inquirer.prompt<{ value: string }>([
+    const { value: editorValue } = await inquirer.prompt<{ value: string }>([
       {
         type: 'editor',
         name: 'value',
         message: prompt,
         default: p.key.startsWith('待补充') ? '' : p.key,
         validate: (s: string) => {
-          if (s === '!q') return true;
-          if (s === '.') return true;
-          return s.trim().length > 0 ? true : '请填写内容 (或输入 . 跳过)';
+          const t = s.trim();
+          if (t === '!q' || t === '.') return true;
+          return t.length > 0 ? true : '请填写内容 (或输入 . 跳过)';
         },
       },
     ]);
 
-    if (value === '!q') {
+    // editor 缓冲区通常带尾换行
+    const value = editorValue.replace(/\s+$/, '');
+    if (value.trim() === '!q') {
       out.warn('用户中断, 已保存已填写的部分');
       break;
     }
-    if (value === '.') {
+    if (value.trim() === '.') {
       out.dim('  跳过');
       skippedCount++;
       continue;

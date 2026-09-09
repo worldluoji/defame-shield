@@ -60,7 +60,7 @@ const SAMPLE_CASE: Case = {
 };
 
 describe('generateDefense (draft 模式)', () => {
-  it('生成包含 5 个反点的答辩状', async () => {
+  it('自动选择 1-3 个最适反点', async () => {
     const a = await analyzeComplaint(SAMPLE_COMPLAINT, { draft: true });
     if (!a.ok) throw new Error('analyze fail');
     const r = await generateDefense({

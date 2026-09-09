@@ -393,8 +393,8 @@ function extractByKeywords(text: string, source: string): ComplaintAnalysis {
   const warnings: string[] = [];
 
   // 姓名抽取
-  const plaintiffName = extractName(text, '原告') || extractName(text, '原告[:：]?\\s*([^\\n]+)');
-  const defendantName = extractName(text, '被告') || extractName(text, '被告[:：]?\\s*([^\\n]+)');
+  const plaintiffName = extractName(text, '原告');
+  const defendantName = extractName(text, '被告');
 
   // 诉请抽取
   const claims = extractClaims(text);
@@ -418,7 +418,7 @@ function extractByKeywords(text: string, source: string): ComplaintAnalysis {
   const courtOfFiling = extractCourtOfFiling(text);
 
   // 元素评分 (粗略)
-  const elementScore = estimateElementScore(text, facts);
+  const elementScore = estimateElementScore(text);
 
   // 反驳优先级
   const rebuttalPriority = claims.map((c) => c.index);
@@ -473,8 +473,8 @@ function extractName(text: string, role: string): string {
     const m = section.match(/(?:姓名|名称)[/\\s]*\*?\*?\s*[:：]\s*\*?\*?([^\n*，,\s]{2,8})/)?.[1];
     if (m && m !== '姓名' && m !== '名称') return m.trim();
   }
-  // 兜底: "原告张三" "被告李四"
-  const inlineM = text.match(new RegExp(`${role}([^\\s\\n,，:：*]{2,8})`, 'm'))?.[1];
+  // 兜底: "原告张三" "原告：张三" "被告李四"
+  const inlineM = text.match(new RegExp(`${role}[:：]?\\s*([^\\s\\n,，:：*]{2,8})`, 'm'))?.[1];
   return inlineM && inlineM !== '姓名' && inlineM !== '名称' ? inlineM.trim() : '';
 }
 
@@ -542,12 +542,12 @@ function extractFacts(text: string): ParsedFacts {
 
 function extractEvidence(text: string): ParsedEvidence[] {
   // 只在"证据"段抽取 (起诉状末尾的"证据清单"小节)
-  const sectionMatch = text.match(/(?:^|\n)#{0,3}\s*证据[清单列]?[：:]?\s*\n+([\s\S]*?)$/);
+  const sectionMatch = text.match(/(?:^|\n)#{0,3}\s*证据(?:清单|目录|列表)?[：:]?\s*\n+([\s\S]*?)$/);
   const section = sectionMatch && sectionMatch[1] ? sectionMatch[1] : '';
   if (!section) return [];
   const items: ParsedEvidence[] = [];
-  // 匹配 "证据 1: xxx" "1. xxx" "(1) xxx"
-  const re = /^[ \t]*(?:证据\s*)?[（(]?(\d+)[）)][、.．:\s]+([^\n]+)/gm;
+  // 匹配 "证据 1: xxx" "1. xxx" "(1) xxx" "1、xxx"
+  const re = /^[ \t]*(?:证据\s*)?[（(]?(\d+)[）)]?[、.．:\s]+([^\n]+)/gm;
   let m: RegExpExecArray | null;
   let idx = 0;
   while ((m = re.exec(section)) !== null && idx < 30) {
@@ -558,7 +558,7 @@ function extractEvidence(text: string): ParsedEvidence[] {
     if (name.length < 2) continue;
 
     // 提取来源: "出自 XX" / "来源: XX" / "XX公证处" / "XX公司"
-    const sourceMatch = fullText.match(/(?:来源|出自|由|系)[:：]?\s*([^\n,，;；]{2,30})/) ||
+    const sourceMatch = fullText.match(/(?:来源|出自|由|系)[:：]?\s*([^\n,，;；)）]{2,30})/) ||
                         fullText.match(/([\u4e00-\u9fa5]{2,15}(?:公证处|人民法院|公司|医院|律师事务所))/);
     const source = sourceMatch && sourceMatch[1] ? sourceMatch[1].trim() : undefined;
 
@@ -613,15 +613,15 @@ function extractLegalBasis(text: string): string[] {
   return Array.from(items);
 }
 
-function estimateElementScore(text: string, facts: ParsedFacts): ElementScore {
+function estimateElementScore(text: string): ElementScore {
   // 简单的评分: 内容越具体 → 越 likely_true
   const hasQuoted = /[""「」"]/.test(text);
-  const hasSpreadingData = /粉丝|浏览|转发|播放/.test(text);
   const hasDamageEvidence = /精神|抑郁|解约|损失/.test(text);
 
   return {
     factAuthenticity: hasQuoted ? 'disputed' : 'unknown',
-    directedness: facts.tortMethod === '（未识别）' ? 'low' : 'medium',
+    // 未识别侵权方式 ≠ 内容不指向原告; 保持 medium, 让反点选择走保守路径
+    directedness: 'medium',
     fault: 'unknown',
     damage: hasDamageEvidence ? 'weak' : 'none_proven',
   };

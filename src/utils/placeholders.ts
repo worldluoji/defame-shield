@@ -18,11 +18,10 @@ export function scanPlaceholders(text: string): PlaceholderItem[] {
   const lines = text.split('\n');
   const items: PlaceholderItem[] = [];
   // 匹配: [待补充: xxx] / [待补充] / [xxx] / [xxx xxx]
-  const re = /\[([^\[\]\n]{1,200})\]/g;
   for (let i = 0; i < lines.length; i++) {
     const line = lines[i]!;
     let m: RegExpExecArray | null;
-    const reLine = /\[([^\[\]\n]{1,200})\]/g;
+    const reLine = /\[([^[\]\n]{1,200})\]/g;
     while ((m = reLine.exec(line)) !== null) {
       const raw = m[0];
       const key = m[1]!.trim();
@@ -65,5 +64,5 @@ export function replacePlaceholder(text: string, key: string, value: string): st
   // 转义正则特殊字符
   const escaped = key.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
   const re = new RegExp(`\\[\\s*${escaped}\\s*\\]`, 'g');
-  return text.replace(re, value);
+  return text.replace(re, () => value);
 }

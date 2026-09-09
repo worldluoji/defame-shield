@@ -79,7 +79,8 @@ export interface SimulateOptions {
  */
 export async function simulateBattle(opts: SimulateOptions): Promise<SimulationResult> {
   const mode = opts.mode ?? 'rule';
-  const targetRounds = opts.rounds ?? 3;
+  const parsedRounds = Number(opts.rounds);
+  const targetRounds = Number.isInteger(parsedRounds) && parsedRounds >= 1 ? parsedRounds : 3;
 
   const trajectory: number[] = [100]; // Round 0: 起诉, 被告胜诉概率初始化为 100 (未开始抗辩)
   const allRounds: Round[] = [];
@@ -130,9 +131,11 @@ export async function simulateBattle(opts: SimulateOptions): Promise<SimulationR
     trajectory.push(round.defendantWinProb);
   }
 
-  // 计算趋势
-  const trend = computeTrend(trajectory);
-  const pivotRound = findPivot(trajectory);
+  // 趋势/转折: 从 Round 1 (被告实际答辩) 起算, 排除 Round 0 的 100 分伪基线
+  const scored = trajectory.slice(1);
+  const trend = computeTrend(scored);
+  const pivotIdx = findPivot(scored);
+  const pivotRound = pivotIdx === undefined ? undefined : pivotIdx + 1;
   const overallAdvice = generateAdvice(allRounds, trend, pivotRound, opts);
 
   return {
@@ -155,7 +158,7 @@ export async function simulateBattle(opts: SimulateOptions): Promise<SimulationR
 /**
  * 评估被告答辩状强度 (Round 1)
  */
-function scoreDefense(defense: string, analysis: ComplaintAnalysis, c: Case): {
+function scoreDefense(defense: string, analysis: ComplaintAnalysis, _c: Case): {
   score: number;
   keyPoints: string[];
   evidenceGaps: string[];
@@ -257,7 +260,7 @@ function ruleBasedSimulate(
   side: '原告' | '被告',
   type: Round['type'],
   prev: Round,
-  opts: SimulateOptions,
+  _opts: SimulateOptions,
 ): Round {
   const lastScore = prev.defendantWinProb;
 
@@ -320,7 +323,7 @@ async function aiBasedSimulate(
 
 **输出格式 (严格 JSON)**:
 - content: 100-300 字的文书内容草稿
-- defendantWinProb: 0-100, ${side === '原告' ? '被告' : '原告'}胜诉可能性评估
+- defendantWinProb: 0-100, **被告**胜诉可能性评估 (无论你在为哪一方起草, 该字段始终指被告的胜诉概率)
 - keyPoints: 3-5 个核心要点
 - evidenceGaps: 1-3 个证据缺口
 - nextAction: 建议下一步`;
@@ -403,7 +406,7 @@ function findPivot(traj: number[]): number | undefined {
   return maxDiff >= 15 ? pivot : undefined;
 }
 
-function generateAdvice(rounds: Round[], trend: 'improving' | 'stable' | 'worsening', pivot: number | undefined, opts: SimulateOptions): string {
+function generateAdvice(rounds: Round[], trend: 'improving' | 'stable' | 'worsening', pivot: number | undefined, _opts: SimulateOptions): string {
   const final = rounds[rounds.length - 1];
   if (!final) return '推演未完成';
 

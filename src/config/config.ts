@@ -27,6 +27,10 @@ const DEFAULT_CONFIG: DshConfig = {
 
 const CONFIG_FILENAME = 'dsh.config.json';
 
+export function defaultConfig(projectRoot: string = process.cwd()): DshConfig {
+  return { ...DEFAULT_CONFIG, projectRoot };
+}
+
 export function getConfigPath(projectRoot: string = process.cwd()): string {
   return join(projectRoot, CONFIG_FILENAME);
 }
@@ -34,7 +38,7 @@ export function getConfigPath(projectRoot: string = process.cwd()): string {
 export function loadConfig(projectRoot: string = process.cwd()): DshConfig {
   const configPath = getConfigPath(projectRoot);
   if (!existsSync(configPath)) {
-    return { ...DEFAULT_CONFIG, projectRoot };
+    return defaultConfig(projectRoot);
   }
   try {
     const content = readFileSync(configPath, 'utf-8');

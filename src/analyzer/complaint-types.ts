@@ -12,8 +12,6 @@
  * 加上 关键要素评分 + 反驳优先级 = 答辩生成的输入。
  */
 
-import type { Case } from '../case/types.js';
-
 /** 4 个核心要件的命中度评估 */
 export type FactAuthenticity = 'likely_true' | 'disputed' | 'likely_false' | 'unknown';
 export type Directedness = 'high' | 'medium' | 'low'; // 内容能否识别原告

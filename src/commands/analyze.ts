@@ -21,17 +21,16 @@ export interface AnalyzeFlags {
   extra?: string;
   /** 静默模式 (不输出 JSON, 只输出消息) */
   silent?: boolean;
-  /** 禁用自动转换 (只接受 .md) */
-  noConvert?: boolean;
 }
 
 export async function analyzeComplaintCommand(input: string, flags: AnalyzeFlags): Promise<void> {
+  if (!existsSync(input)) die(`文件不存在: ${input}`);
   // 1. 检测格式
   const format = detectFormat(input);
   let textInput = input;
 
-  // 2. 非 .md 格式 → 自动转 markdown
-  if (format !== 'md' && format !== 'unsupported' && !flags.noConvert) {
+  // 2. 非 .md 格式 → 自动转 markdown (txt/md 由转换器 passthrough)
+  if (format !== 'md' && format !== 'unsupported') {
     out.info(`检测到 ${format} 格式, 自动调用 MarkItDown 转换...`);
     const converter = new DocumentConverter();
     const result = await converter.convert(input);
@@ -65,14 +64,14 @@ export async function analyzeComplaintCommand(input: string, flags: AnalyzeFlags
     out.error(result.error);
     if (result.partialDraft) {
       out.warn('已 fallback 到 draft 模式, 保存到 out 指定路径');
-      const outPath = resolveOutPath(flags, textInput, true);
+      const outPath = resolveOutPath(flags, textInput);
       writeOutput(outPath, result.partialDraft);
     }
     process.exit(1);
   }
 
   // 输出路径
-  const outPath = resolveOutPath(flags, textInput, false);
+  const outPath = resolveOutPath(flags, textInput);
   writeOutput(outPath, result.analysis);
 
   out.success(`已生成拆解结果: ${outPath}`);
@@ -100,7 +99,7 @@ function resolveTempMdPath(flags: AnalyzeFlags, input: string): string {
   return join(dir, `${base}.converted.md`);
 }
 
-function resolveOutPath(flags: AnalyzeFlags, input: string, isFallback: boolean): string {
+function resolveOutPath(flags: AnalyzeFlags, input: string): string {
   if (flags.out) return flags.out;
 
   // 默认: data/cases/<case-id>/complaint-analysis.json (如果 --case 指定)

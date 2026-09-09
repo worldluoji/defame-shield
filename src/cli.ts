@@ -88,7 +88,7 @@ applyCmd
 const convertCmd = program.command('convert <file>').description('文档转换: PDF/Word/PPT/Excel → markdown (需安装 Microsoft MarkItDown)');
 convertCmd
   .option('--out <path>', '输出 markdown 路径 (默认: <原名>.md)')
-  .option('--no-cache', '跳过缓存, 强制重新转换', false)
+  .option('--no-cache', '跳过缓存, 强制重新转换')
   .option('--print-meta', '打印完整元数据', false)
   .option('--check', '仅检查 markitdown 是否已安装', false)
   .action(convertCommand);
@@ -97,7 +97,7 @@ const simCmd = program.command('simulate <defense>').description('攻防推演 �
 simCmd
   .requiredOption('--analysis <json>', '拆解结果 JSON 路径')
   .option('--case <id>', '本地案件 ID (提供更准确的被告信息)')
-  .option('--rounds <n>', '推演轮数 (默认 3)', '3')
+  .option('--rounds <n>', '推演轮数 (默认 3)', (v: string, _previous: number) => parseInt(v, 10), 3)
   .option('--mode <mode>', '模式: rule | ai (默认 rule)', 'rule')
   .option('--provider <provider>', 'LLM provider')
   .option('--out <path>', '输出 JSON 路径')

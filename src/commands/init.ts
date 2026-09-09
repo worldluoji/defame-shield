@@ -1,15 +1,27 @@
 /**
  * dsh init — 初始化项目（创建 dsh.config.json + 案件目录 + .env.local 提示）
  */
-import { existsSync, writeFileSync, mkdirSync, copyFileSync } from 'node:fs';
+import { existsSync, mkdirSync, copyFileSync } from 'node:fs';
 import { join } from 'node:path';
 import inquirer from 'inquirer';
-import { loadConfig, saveConfig, type DshConfig } from '../config/config.js';
+import { defaultConfig, loadConfig, saveConfig, type DshConfig } from '../config/config.js';
 import { out, die } from '../utils/console.js';
 
 export async function initCommand(): Promise<void> {
   const root = process.cwd();
-  const existing = loadConfig(root);
+  // 损坏的 dsh.config.json 不应阻断 init (它正是来修复问题的)
+  let existing: DshConfig;
+  try {
+    existing = loadConfig(root);
+  } catch (e) {
+    out.warn(`现有 dsh.config.json 无法解析, 将重新生成: ${(e as Error).message.split('\n')[0]}`);
+    existing = defaultConfig(root);
+  }
+
+  // .env.example 缺失会让 init 走到一半才失败, 前置检查
+  if (!existsSync(join(root, '.env.local')) && !existsSync(join(root, '.env.example'))) {
+    die('.env.example 不存在, 请先创建 (参考 README 的 LLM Provider 一节)');
+  }
 
   if (existsSync(join(root, 'dsh.config.json'))) {
     const { overwrite } = await inquirer.prompt<{ overwrite: boolean }>([

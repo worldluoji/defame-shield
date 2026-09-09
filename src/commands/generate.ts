@@ -2,13 +2,14 @@
  * dsh generate <type> --case <id> — 生成文书
  * dsh generate defense --from-analysis <json>  — 基于拆解结果生成答辩状
  */
-import { writeFileSync, existsSync, mkdirSync, readFileSync } from 'node:fs';
+import { writeFileSync, existsSync, mkdirSync } from 'node:fs';
 import { join } from 'node:path';
 import { loadConfig } from '../config/config.js';
 import { loadCase, outputsDir } from '../case/case.js';
 import { generateDocument } from '../generators/generate.js';
 import { generateDefense } from '../generators/defense.js';
 import { out, die } from '../utils/console.js';
+import { readJsonFile } from '../utils/json.js';
 import { DOCUMENT_TYPES, DOCUMENT_TYPE_LABELS, type DocumentType } from '../types.js';
 import type { ComplaintAnalysis } from '../analyzer/complaint-types.js';
 
@@ -49,12 +50,13 @@ export async function generateCommand(type: string, flags: GenerateFlags): Promi
   const outDir = outputsDir(config, c.id);
   if (!existsSync(outDir)) mkdirSync(outDir, { recursive: true });
 
-  out.info(`生成 ${DOCUMENT_TYPE_LABELS[type as DocumentType]}  /  案件: ${c.id}  /  模式: ${flags.draft ? 'draft (纯模板)' : 'AI 增强'}`);
+  const draft = flags.draft || !config.llmEnabled;
+  out.info(`生成 ${DOCUMENT_TYPE_LABELS[type as DocumentType]}  /  案件: ${c.id}  /  模式: ${draft ? 'draft (纯模板)' : 'AI 增强'}`);
 
   const result = await generateDocument({
     case: c,
     type: type as DocumentType,
-    draft: flags.draft,
+    draft,
     provider: flags.provider as 'deepseek' | 'minimax' | undefined,
     extraInstruction: flags.extra,
   });
@@ -77,24 +79,23 @@ async function generateDefenseFromAnalysis(flags: GenerateFlags): Promise<void> 
   if (!flags.fromAnalysis) die('必须指定 --from-analysis <json>');
   if (!existsSync(flags.fromAnalysis)) die(`拆解结果文件不存在: ${flags.fromAnalysis}`);
 
-  const analysis = JSON.parse(readFileSync(flags.fromAnalysis, 'utf-8')) as ComplaintAnalysis;
-  // 兼容: case 来自 analysis.parties 或 --case 指定
+  const analysis = readJsonFile<ComplaintAnalysis>(flags.fromAnalysis);
   const config = loadConfig();
-  const caseId = flags.case ?? analysis.parties.被告.name.replace(/\s/g, '-').toLowerCase() ?? 'def-default';
   const c = flags.case ? loadCase(config, flags.case) : null;
   if (!c) {
-    die(`需要 --case <id> 指定案件以获取被告方信息 (analysis 中的被告信息不完整)`);
+    die(`--from-analysis 生成答辩状必须同时指定 --case <id> (提供被告方信息)`);
   }
 
   const outDir = outputsDir(config, c.id);
   if (!existsSync(outDir)) mkdirSync(outDir, { recursive: true });
 
-  out.info(`生成 民事答辩状  /  案件: ${c.id}  /  基于拆解: ${flags.fromAnalysis}  /  模式: ${flags.draft ? 'draft' : 'AI 润色'}`);
+  const draft = flags.draft || !config.llmEnabled;
+  out.info(`生成 民事答辩状  /  案件: ${c.id}  /  基于拆解: ${flags.fromAnalysis}  /  模式: ${draft ? 'draft' : 'AI 润色'}`);
 
   const result = await generateDefense({
     analysis,
     case: c,
-    draft: flags.draft,
+    draft,
     provider: flags.provider as 'deepseek' | 'minimax' | undefined,
     extraInstruction: flags.extra,
   });

@@ -15,7 +15,7 @@
 import { spawn, spawnSync } from 'node:child_process';
 import { existsSync, mkdtempSync, readFileSync, rmSync } from 'node:fs';
 import { homedir, tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { join, resolve } from 'node:path';
 
 export interface MarkItDownOptions {
   /** 超时 ms, 默认 60s */
@@ -108,13 +108,6 @@ export async function convertWithMarkItDown(
     return { ok: false, error: `文件不存在: ${filePath}`, code: 'spawn_error' };
   }
 
-  // markitdown 0.1.8b1 不支持 "-o -" 输出到 stdout, 用临时文件
-  const tmpDir = mkdtempSync(join(tmpdir(), 'dsh-markitdown-'));
-  const tmpOutput = join(tmpDir, 'output.md');
-  const args = [filePath, '-o', tmpOutput];
-  if (opts.enablePlugins) args.push('--use-plugins');
-  if (opts.docintelEndpoint) args.push('-d', '-e', opts.docintelEndpoint);
-
   // 优先用 findMarkItDownPath() 找本地 .venv 的二进制
   const markitdownBin = findMarkItDownPath();
   if (!markitdownBin) {
@@ -126,12 +119,21 @@ export async function convertWithMarkItDown(
     };
   }
 
+  // markitdown 0.1.8b1 不支持 "-o -" 输出到 stdout, 用临时文件
+  const tmpDir = mkdtempSync(join(tmpdir(), 'dsh-markitdown-'));
+  const tmpOutput = join(tmpDir, 'output.md');
+  // 以 "-" 开头的路径会被 markitdown 当选项解析, 绝对化规避
+  const safeInput = filePath.startsWith('-') ? resolve(filePath) : filePath;
+  const args = [safeInput, '-o', tmpOutput];
+  if (opts.enablePlugins) args.push('--use-plugins');
+  if (opts.docintelEndpoint) args.push('-d', '-e', opts.docintelEndpoint);
+
   const start = Date.now();
   const timeoutMs = opts.timeoutMs ?? 60_000;
 
   return new Promise((resolve) => {
-    const child = spawn(markitdownBin, args, { stdio: ['ignore', 'pipe', 'pipe'] });
-    let stdout = '';
+    // markitdown 结果写入临时文件, stdout 仅为日志, 直接丢弃
+    const child = spawn(markitdownBin, args, { stdio: ['ignore', 'ignore', 'pipe'] });
     let stderr = '';
     let killed = false;
 
@@ -140,15 +142,13 @@ export async function convertWithMarkItDown(
       child.kill('SIGTERM');
     }, timeoutMs);
 
-    child.stdout.on('data', (data: Buffer) => {
-      stdout += data.toString('utf-8');
-    });
     child.stderr.on('data', (data: Buffer) => {
       stderr += data.toString('utf-8');
     });
 
     child.on('error', (err) => {
       clearTimeout(timer);
+      cleanupTmp(tmpDir);
       if ((err as NodeJS.ErrnoException).code === 'ENOENT') {
         resolve({
           ok: false,

@@ -11,14 +11,21 @@ export function loadEnvFile(projectRoot: string = process.cwd()): void {
   for (const filename of ENV_FILES) {
     const envPath = join(projectRoot, filename);
     if (!existsSync(envPath)) continue;
-    const content = readFileSync(envPath, 'utf-8');
+    const content = readFileSync(envPath, 'utf-8').replace(/^\uFEFF/, '');
     for (const line of content.split('\n')) {
       const trimmed = line.trim();
       if (!trimmed || trimmed.startsWith('#')) continue;
       const eq = trimmed.indexOf('=');
       if (eq === -1) continue;
       const key = trimmed.slice(0, eq).trim();
-      const value = trimmed.slice(eq + 1).trim().replace(/^['"]|['"]$/g, '');
+      let value = trimmed.slice(eq + 1).trim();
+      const quoted = value.match(/^(['"])(.*)\1$/);
+      if (quoted) {
+        value = quoted[2]!;
+      } else {
+        // 无引号值: " #..." 起为行内注释
+        value = value.replace(/\s+#.*$/, '').trim();
+      }
       if (!process.env[key]) process.env[key] = value;
     }
   }

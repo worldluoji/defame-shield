@@ -4,9 +4,11 @@
  * dsh self-check <defense.md> --analysis <json> [--mode rule|ai|hybrid]
  */
 import { readFileSync, existsSync, writeFileSync, mkdirSync } from 'node:fs';
-import { dirname, join, basename } from 'node:path';
+import { dirname, basename } from 'node:path';
 import { selfCheckDefense, type CheckMode, type SelfCheckResult } from '../rebuttal/self-check.js';
 import { out, die } from '../utils/console.js';
+import { readJsonFile } from '../utils/json.js';
+import type { ComplaintAnalysis } from '../analyzer/complaint-types.js';
 
 export interface SelfCheckFlags {
   /** 拆解结果 JSON 路径 */
@@ -24,9 +26,12 @@ export interface SelfCheckFlags {
 export async function selfCheckCommand(defensePath: string, flags: SelfCheckFlags): Promise<void> {
   if (!existsSync(defensePath)) die(`答辩状文件不存在: ${defensePath}`);
   if (!existsSync(flags.analysis)) die(`拆解结果文件不存在: ${flags.analysis}`);
+  if (flags.mode && !['rule', 'ai', 'hybrid'].includes(flags.mode)) {
+    die(`非法 --mode: ${flags.mode} (可选: rule | ai | hybrid)`);
+  }
 
   const defense = readFileSync(defensePath, 'utf-8');
-  const analysis = JSON.parse(readFileSync(flags.analysis, 'utf-8'));
+  const analysis = readJsonFile<ComplaintAnalysis>(flags.analysis);
 
   out.info(`自检答辩状: ${basename(defensePath)}  /  基于拆解: ${basename(flags.analysis)}  /  模式: ${flags.mode ?? 'rule'}`);
 

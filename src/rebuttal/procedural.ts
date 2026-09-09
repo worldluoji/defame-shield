@@ -34,7 +34,7 @@ export const PROCEDURAL_STRATEGIES: Record<'statute-limitations' | 'jurisdiction
 
 2. **本案诉讼时效已届满**。涉案侵权行为发生于 ${'{tortTime}'}, 原告于 ${'{filingTime}'} 方提起本案诉讼, 距侵权行为发生已逾 ${'{elapsed}'} 年。即使自原告"知道或应当知道"权利受损之日起算, 亦已超过三年诉讼时效。
 
-3. **不存在时效中断、中止的法定情形**。原告未能举证证明本案存在《民法典》第一百九十四条规定的诉讼时效中断情形 (提起诉讼/主张权利/对方同意履行) 或第一百九十五条规定的中止情形 (不可抗力/无/限制民事行为能力人没有法定代理人等)。
+3. **不存在时效中断、中止的法定情形**。原告未能举证证明本案存在《民法典》第一百九十五条规定的诉讼时效中断情形 (提起诉讼/主张权利/对方同意履行) 或第一百九十四条规定的中止情形 (不可抗力/无/限制民事行为能力人没有法定代理人等)。
 
 4. **法律后果**。依据《民法典》第一百九十二条, 诉讼时效期间届满的, 义务人可以提出不履行义务的抗辩。被告在此明确提出时效抗辩, 原告的全部诉讼请求应予驳回。`,
     evidenceToGather: [
@@ -67,10 +67,11 @@ export const PROCEDURAL_STRATEGIES: Record<'statute-limitations' | 'jurisdiction
     name: '管辖异议',
     description: '受案法院对案件无管辖权, 应当移送有管辖权的人民法院审理',
     applicability: (a) => {
-      if (a.warnings.length > 0) return 0.3;
+      // draft 模式几乎必有 warnings, 不能让其掩盖下方的实质信号
       if (a.facts.place && a.parties.被告.address && !a.parties.被告.address.includes(a.facts.place.slice(0, 4))) {
         return 0.5;
       }
+      if (a.warnings.length > 0) return 0.3;
       return 0.15;
     },
     template: `受案人民法院对**本案无管辖权**, 应当依法将案件移送有管辖权的人民法院。

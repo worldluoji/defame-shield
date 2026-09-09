@@ -4,7 +4,8 @@
 set -e
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-cd "$SCRIPT_DIR"
+# .venv 必须建在仓库根目录 (markitdown-adapter 从 cwd/.venv 查找二进制)
+cd "$SCRIPT_DIR/.."
 
 echo "================================================"
 echo "defame-shield 一键环境安装"
@@ -59,7 +60,7 @@ echo ""
 echo "▶ 验证 markitdown..."
 if .venv/bin/markitdown --help >/dev/null 2>&1; then
   echo "✓ markitdown 安装成功"
-  echo "  路径: $SCRIPT_DIR/.venv/bin/markitdown"
+  echo "  路径: $SCRIPT_DIR/../.venv/bin/markitdown"
 else
   echo "❌ markitdown 验证失败"
   exit 1

@@ -12,7 +12,7 @@
  */
 
 import { callLLM } from '../llm/client.js';
-import type { ComplaintAnalysis, ParsedClaim } from '../analyzer/complaint-types.js';
+import type { ComplaintAnalysis } from '../analyzer/complaint-types.js';
 import type { RebuttalStrategy, StrategyId } from './strategies-base.js';
 import { STRATEGIES, PROCEDURAL_IDS } from './strategies.js';
 
@@ -135,8 +135,12 @@ export function applyFixes(
     if (v.id === 'missing-statute-limitations' ||
         v.id === 'missing-jurisdiction' ||
         v.id === 'missing-wrong-party') {
-      // 注入程序性抗辩段
+      // 注入程序性抗辩段 (strategyId 可能来自 AI 输出, 不可信)
       const strategy = STRATEGIES[v.strategyId];
+      if (!strategy) {
+        notes.push(`跳过未知策略 ID: ${String(v.strategyId)}`);
+        continue;
+      }
       const section = renderProceduralDefense(strategy, caseContext);
       patched = injectAfter(patched, '## 总体答辩策略', section);
       injected++;
@@ -192,11 +196,13 @@ function injectAfter(text: string, anchor: string, section: string, before = fal
 }
 
 function renderProceduralDefense(strategy: RebuttalStrategy, ctx: { caseName: string; defendantName: string }): string {
+  // 模板变量 (侵权时间/法院/地址等) 案件事实未知, 按文书惯例留横线
+  const body = strategy.template.replace(/\{(tortTime|filingTime|elapsed|defendantAddress|court|platform)\}/g, '__________');
   return `### ${strategy.name}（程序性抗辩）
 
 > **由抗辩自检器自动注入** — 本节为程序性反点, 优先于实体反点.
 
-${strategy.template}
+${body}
 
 **适用说明**: 本节为程序性抗辩, 一旦成立可**直接驳回**原告全部诉请. ${ctx.defendantName} 在此明确提出${strategy.name}, 提请受案法院依法审查.
 `;
@@ -262,7 +268,7 @@ function ruleBasedCheck(defense: string, analysis: ComplaintAnalysis): Vulnerabi
   }
 
   // 2. 是否还含 [待补充] 占位符
-  const placeholders = (defense.match(/\[待补充[^\]]*\]|\[.{1,30}\]/g) ?? []).filter(
+  const placeholders = (defense.match(/\[待补充[^\]]*\]|\[[^\]\n]{1,30}\]/g) ?? []).filter(
     (p) => !p.includes('**') || p.includes('待补充'),
   );
   if (placeholders.length > 0) {
@@ -323,7 +329,6 @@ function ruleBasedCheck(defense: string, analysis: ComplaintAnalysis): Vulnerabi
 
   // 5. 诉请匹配检查 — 诉请越多, 越要逐条回应
   for (const claim of analysis.claims) {
-    const matched = usedStrategies.length; // 简化: 用过几个反点
     if (claim.content.length > 30 && !defense.includes(`诉请 ${claim.index}：`)) {
       vulns.push({
         id: `claim-${claim.index}-no-response`,

@@ -8,7 +8,13 @@ import { join } from 'node:path';
 import type { Case, CaseInput } from './types.js';
 import { getCasesDir, type DshConfig } from '../config/config.js';
 
+/** 案件 ID 白名单 — 防止 join 时路径穿越 */
+const CASE_ID_RE = /^[A-Za-z0-9_-]+$/;
+
 export function caseDir(config: DshConfig, caseId: string): string {
+  if (!CASE_ID_RE.test(caseId)) {
+    throw new Error(`非法案件 ID: "${caseId}" (仅允许字母/数字/下划线/连字符)`);
+  }
   return join(getCasesDir(config), caseId);
 }
 
@@ -31,8 +37,9 @@ export function listCases(config: DshConfig): Case[] {
     const json = join(full, 'case.json');
     if (!existsSync(json)) continue;
     try {
-      const c = JSON.parse(readFileSync(json, 'utf-8')) as Case;
-      entries.push(c);
+      const c = JSON.parse(readFileSync(json, 'utf-8')) as Partial<Case>;
+      if (typeof c?.id !== 'string' || typeof c?.createdAt !== 'string') continue;
+      entries.push(c as Case);
     } catch {
       // skip invalid case.json
     }
@@ -43,7 +50,11 @@ export function listCases(config: DshConfig): Case[] {
 export function loadCase(config: DshConfig, caseId: string): Case | null {
   const path = caseJsonPath(config, caseId);
   if (!existsSync(path)) return null;
-  return JSON.parse(readFileSync(path, 'utf-8')) as Case;
+  try {
+    return JSON.parse(readFileSync(path, 'utf-8')) as Case;
+  } catch (e) {
+    throw new Error(`case.json 解析失败: ${path}\n  ${(e as Error).message}`);
+  }
 }
 
 /** 创建案件目录 + 写 case.json */

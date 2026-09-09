@@ -131,11 +131,17 @@ describe('analyzeComplaint (AI 模式失败回退)', () => {
   });
 });
 
-describe('LLM JSON 解析边界', () => {
-  it('从 markdown 包裹的 ```json``` 中提取', () => {
-    // 直接构造一个 mock — 但我们这里测的是 draft 模式路径
-    // 真正的 LLM JSON 解析走 parseAndValidateLLMJson 是 private, 测不到
-    // 这里只测 draft 模式
+describe('draft 模式证据段抽取', () => {
+  it('证据清单段 → 逐条抽取, 含来源/公证标记', async () => {
+    const withEvidence = SAMPLE_COMPLAINT
+      + '\n## 证据清单\n\n1. 公证书 (北京市长安公证处, 2025年6月2日)\n2. 微博截图 (来源: 微博平台)\n';
+    const res = await analyzeComplaint(withEvidence, { draft: true });
+    if (!res.ok) throw new Error('fail');
+    expect(res.analysis.evidence.length).toBeGreaterThanOrEqual(2);
+    const notarizedItem = res.analysis.evidence.find((e) => e.name.includes('公证书'));
+    expect(notarizedItem?.notarized).toBe(true);
+    const sourceItem = res.analysis.evidence.find((e) => e.name.includes('微博截图'));
+    expect(sourceItem?.source).toBe('微博平台');
   });
 });
 

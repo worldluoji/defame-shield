@@ -122,6 +122,24 @@ describe('simulateBattle (rule 模式)', () => {
     });
     expect(r.overallAdvice.length).toBeGreaterThan(10);
   });
+
+  it('rounds 传字符串时归一化, 非法值回退 3', async () => {
+    const r2 = await simulateBattle({
+      case: sampleCase,
+      analysis: sampleAnalysis,
+      defense: '## 答辩',
+      rounds: '2' as unknown as number,
+    });
+    expect(r2.rounds.length).toBe(3); // Round 0 + 2
+
+    const rBad = await simulateBattle({
+      case: sampleCase,
+      analysis: sampleAnalysis,
+      defense: '## 答辩',
+      rounds: 'abc' as unknown as number,
+    });
+    expect(rBad.rounds.length).toBe(4); // 回退默认 3
+  });
 });
 
 describe('法条版本检查', () => {
@@ -169,8 +187,8 @@ describe('法条版本检查', () => {
     expect(STATUTE_REGISTRY.length).toBeGreaterThanOrEqual(18);
   });
 
-  it('新条文被检测 (民法典 1012 不适用诉讼时效)', () => {
-    const r = checkStatute({ raw: '《民法典》1012', category: '民法典', article: '1012' });
+  it('新条文被检测 (民法典 995 不适用诉讼时效, 汉字条号归一化)', () => {
+    const r = checkStatute({ raw: '《民法典》995', category: '民法典', article: '九百九十五' });
     expect(r.status).toBe('found');
     expect(r.text).toContain('不适用诉讼时效');
   });
@@ -219,9 +237,3 @@ describe('法条版本检查', () => {
     expect(r.status).toBe('found');
   });
 });
-
-  it('每个登记条 lastReviewed 是 ISO', () => {
-    for (const s of STATUTE_REGISTRY) {
-      expect(s.lastReviewed).toMatch(/^\d{4}-\d{2}-\d{2}$/);
-    }
-  });

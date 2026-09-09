@@ -143,8 +143,8 @@ export const STATUTE_REGISTRY: StatuteEntry[] = [
     recentChanges: '注: 此条虽为身体权条文, 但常被作为人格权请求权 (停止侵害等) 的基础规范被援引',
   },
   {
-    id: '民法典-1012',
-    name: '《中华人民共和国民法典》第一千零一十二条',
+    id: '民法典-995',
+    name: '《中华人民共和国民法典》第九百九十五条',
     text: '自然人因人格权益遭受非法侵害的，有权主张停止侵害、排除妨碍、消除危险、消除影响、恢复名誉、赔礼道歉。\n上述请求权**不适用诉讼时效的规定**。',
     lastReviewed: '2026-08-01',
     source: '中国法律法规数据库 (https://flk.npc.gov.cn)',
@@ -271,7 +271,7 @@ export const STATUTE_REGISTRY: StatuteEntry[] = [
     recentChanges: '⚠️ 重要: 管辖异议应在**答辩期间**提出, 之后未提视为放弃 (除违反级别/专属管辖)',
   },
   {
-    id: '民诉法-191',
+    id: '民法典-191',
     name: '《中华人民共和国民法典》第一百九十一条',
     text: '未成年人遭受性侵害的损害赔偿请求权的诉讼时效期间，自受害人年满十八周岁之日起计算。',
     lastReviewed: '2026-08-01',
@@ -279,7 +279,7 @@ export const STATUTE_REGISTRY: StatuteEntry[] = [
     relatedInterpretations: [],
   },
   {
-    id: '民诉法-192',
+    id: '民法典-192',
     name: '《中华人民共和国民法典》第一百九十二条',
     text: '诉讼时效期间届满的，义务人可以提出不履行义务的抗辩。\n诉讼时效期间届满后，义务人同意履行的，不得以诉讼时效期间届满为由抗辩；义务人已经自愿履行的，不得请求返还。',
     lastReviewed: '2026-08-01',
@@ -380,10 +380,11 @@ export function checkStatute(item: LegalBasisItem, now: Date = new Date()): Stat
     warnings.push(`近况: ${entry.recentChanges}`);
   }
 
-  // 检查 article 是否匹配
-  if (item.article && entry.id.endsWith(`-${item.article}`)) {
+  // 检查 article 是否匹配 (汉字数字归一化后再比对)
+  const normalizedArticle = item.article ? cnToArab(item.article) : undefined;
+  if (normalizedArticle && entry.id.endsWith(`-${normalizedArticle}`)) {
     // article 一致
-  } else if (item.article) {
+  } else if (normalizedArticle) {
     warnings.push(`article 字段 "${item.article}" 与登记中条款号不完全一致, 请核对`);
   }
 

@@ -1,7 +1,7 @@
 /**
  * 反驳策略类型定义 (独立文件, 便于 procedural.ts 依赖)
  */
-import type { ComplaintAnalysis, ParsedClaim } from '../analyzer/complaint-types.js';
+import type { ComplaintAnalysis } from '../analyzer/complaint-types.js';
 
 export type Applicability = number;
 

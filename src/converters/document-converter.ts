@@ -9,7 +9,7 @@
  *  - markitdown 不可用时给清晰错误
  */
 
-import { existsSync, statSync, mkdirSync, readFileSync, writeFileSync, readdirSync } from 'node:fs';
+import { existsSync, statSync, mkdirSync, readFileSync, writeFileSync, readdirSync, unlinkSync } from 'node:fs';
 import { join } from 'node:path';
 import { homedir } from 'node:os';
 import { createHash } from 'node:crypto';
@@ -231,14 +231,15 @@ export class DocumentConverter {
   clearCache(): { removed: number } {
     if (!existsSync(this.cacheDir)) return { removed: 0 };
     const files = readdirSync(this.cacheDir).filter((f) => f.endsWith('.md'));
+    let removed = 0;
     for (const f of files) {
       try {
-        const { unlinkSync } = require('node:fs');
         unlinkSync(join(this.cacheDir, f));
+        removed++;
       } catch {
         // 忽略
       }
     }
-    return { removed: files.length };
+    return { removed };
   }
 }
