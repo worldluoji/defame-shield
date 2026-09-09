@@ -15,14 +15,36 @@
 
 ## 5 分钟上手
 
-### 1. 初始化项目
+### 1. 安装 dsh 命令
+
+> 包尚未发布到 npm,`npx defame-shield` 暂不可用;`dsh` 需要先安装依赖并链接。
+
+```bash
+cd defame-shield          # 本仓库根目录
+pnpm setup                # pnpm ≥8 首次需配置全局 bin 目录 (写入 ~/.zshrc, 之后新开终端生效)
+pnpm install
+pnpm link --global        # 全局注册 dsh (也可用 npm link)
+dsh --help                # 验证
+```
+
+> 若 `pnpm link --global` 报 "The configured global bin directory ... is not in PATH",
+> 说明 `pnpm setup` 后还没重载 shell 配置 — 新开终端或 `source ~/.zshrc` 后重试。
+
+不做全局链接也可以,在本仓库内直接运行:
+
+```bash
+pnpm dev -- <args>                       # 开发模式 (tsx, 无需 build)
+pnpm build && node bin/dsh.mjs <args>    # build 后直接跑
+```
+
+### 2. 初始化项目
 
 ```bash
 cd your-project
-npx defame-shield init   # 或 pnpm dsh init
+dsh init
 ```
 
-### 2. 配置 API key
+### 3. 配置 API key
 
 编辑 `.env.local`:
 
@@ -33,13 +55,13 @@ DEEPSEEK_API_KEY=sk-你的key
 
 > 不填 key 也能用 `--draft` 纯模板模式, 只是没有 LLM 润色。
 
-### 3. 创建案件 (被告视角)
+### 4. 创建案件 (被告视角)
 
 ```bash
 dsh case new def-sample-001
 ```
 
-### 4. 拆解原告起诉状
+### 5. 拆解原告起诉状
 
 把起诉状复制成 markdown,保存到 `data/cases/sample-001/complaint.md`,然后:
 
@@ -49,7 +71,7 @@ dsh analyze-complaint data/cases/sample-001/complaint.md --case def-sample-001 -
 
 输出: `data/cases/def-sample-001/complaint-analysis.json` (拆解结果)
 
-### 5. 生成答辩状 (基于拆解)
+### 6. 生成答辩状 (基于拆解)
 
 ```bash
 dsh generate defense --case def-sample-001 \
