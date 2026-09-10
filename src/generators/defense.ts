@@ -13,6 +13,7 @@ import { callLLM, type LLMResult } from '../llm/client.js';
 import { selectStrategies, selectStrategyForClaim, type RebuttalStrategy } from '../rebuttal/strategies.js';
 import type { ComplaintAnalysis, ParsedClaim, CaseReference } from '../analyzer/complaint-types.js';
 import type { Case } from '../case/types.js';
+import { parseLooseDate, elapsedYears } from '../utils/dates.js';
 
 export interface DefenseGenerateOpts {
   /** 拆解结果 */
@@ -245,8 +246,10 @@ function renderClaimRebuttal(claim: ParsedClaim, strategy: RebuttalStrategy, con
   const amountStr = claim.amount ? `（${claim.amount.toLocaleString('zh-CN')} 元）` : '';
   // 程序性反点模板里的 {placeholder} 替换为可读形式; 未知的一律留横线, 不虚构
   const tortTime = context.analysis.facts.time || '__________';
-  const filingTime = '__________';
-  const elapsed = '__________';
+  const filingTime = context.analysis.filingDate || '[待补充: 起诉日期]';
+  const tort = parseLooseDate(context.analysis.facts.time ?? '');
+  const filing = parseLooseDate(context.analysis.filingDate ?? '');
+  const elapsed = tort && filing ? elapsedYears(tort, filing).toFixed(1) : '__________';
   const defendantAddress = context.case.defendant.address || '__________';
   const court = context.case.court || '__________';
   const platform = context.analysis.facts.place || context.analysis.facts.tortMethod || '__________';

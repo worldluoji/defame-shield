@@ -52,12 +52,31 @@ describe('applyFixes', () => {
   it('注入程序性反点 (missing-statute-limitations)', () => {
     const defense = '## 总体答辩策略\n这是策略';
     const vuln = mkVuln({ id: 'missing-statute-limitations', strategyId: 'statute-limitations', risk: 'critical' });
-    const result = applyFixes(defense, [vuln], sampleAnalysis, {
+    // 时效注入的前提: 拆解结果能确认侵权-起诉间隔确超 3 年
+    const analysis: ComplaintAnalysis = {
+      ...sampleAnalysis,
+      facts: { ...sampleAnalysis.facts, time: '2021 年 3 月' },
+      filingDate: '2025-06-01',
+    };
+    const result = applyFixes(defense, [vuln], analysis, {
       caseName: '测试',
       defendantName: '李四',
     });
     expect(result.injectedCount).toBe(1);
     expect(result.patched).toContain('超过诉讼时效');
+  });
+
+  it('无时效数据时拒绝注入时效断言 (漏洞可能来自 AI, 不可信)', () => {
+    const defense = '## 总体答辩策略\n这是策略';
+    const vuln = mkVuln({ id: 'missing-statute-limitations', strategyId: 'statute-limitations', risk: 'critical' });
+    // sampleAnalysis 无 facts.time / filingDate → 不得注入
+    const result = applyFixes(defense, [vuln], sampleAnalysis, {
+      caseName: '测试',
+      defendantName: '李四',
+    });
+    expect(result.injectedCount).toBe(0);
+    expect(result.patched).not.toContain('超过诉讼时效');
+    expect(result.summary).toContain('跳过 missing-statute-limitations');
   });
 
   it('低风险漏洞不注入', () => {

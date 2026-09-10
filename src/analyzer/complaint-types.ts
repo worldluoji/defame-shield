@@ -133,6 +133,8 @@ export interface ComplaintAnalysis {
   warnings: string[];
   /** 类案参考 (Step 2 填入) */
   caseReferences?: CaseReference[];
+  /** 起诉日期 (起诉状落款/提起本文诉讼的日期, YYYY-MM-DD 或 YYYY-MM) — 诉讼时效计算基准 */
+  filingDate?: string;
   /** 起诉法院 (扩字段 C) */
   courtOfFiling?: string;
   /** 案号 (扩字段 C, 通常起诉状不含) */

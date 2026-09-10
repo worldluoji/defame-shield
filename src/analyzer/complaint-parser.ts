@@ -76,6 +76,9 @@ const ANALYZER_SYSTEM_PROMPT = `你是一名中国民事诉讼律师，专长名
 ### 6. 起诉法院 (courtOfFiling)
 "此致" 后面的人民法院名称, 例如 "北京市朝阳区人民法院"。
 
+### 7. 起诉日期 (filingDate)
+起诉状落款日期: "具状人/起诉人" 之后所载的年/月/日, 或正文中 "于 X 年 X 月 X 日提起本诉/起诉" 的日期。输出 ISO 格式 YYYY-MM-DD (只有年月时输出 YYYY-MM)。起诉状中确实没有日期则输出 null。
+
 ## 4 要件评分 (elementScore) — 关键
 
 为每条诉请的成立可能性评估：
@@ -245,6 +248,9 @@ function parseAndValidateLLMJson(
       : undefined,
     courtOfFiling: obj.courtOfFiling || obj['court'] || obj['起诉法院']
       ? String(obj.courtOfFiling ?? obj['court'] ?? obj['起诉法院'])
+      : undefined,
+    filingDate: obj.filingDate || obj['起诉日期']
+      ? String(obj.filingDate ?? obj['起诉日期'])
       : undefined,
     caseNumber: obj.caseNumber || obj['案号'] ? String(obj.caseNumber ?? obj['案号']) : undefined,
   };
@@ -417,6 +423,9 @@ function extractByKeywords(text: string, source: string): ComplaintAnalysis {
   // 起诉法院抽取
   const courtOfFiling = extractCourtOfFiling(text);
 
+  // 起诉日期抽取 (诉讼时效计算基准)
+  const filingDate = extractFilingDate(text);
+
   // 元素评分 (粗略)
   const elementScore = estimateElementScore(text);
 
@@ -442,6 +451,7 @@ function extractByKeywords(text: string, source: string): ComplaintAnalysis {
     confidence: 0.3,
     warnings,
     courtOfFiling,
+    filingDate,
   };
 }
 
@@ -533,11 +543,42 @@ function extractFacts(text: string): ParsedFacts {
     section.match(/(粉丝\s*[\d,，]+|浏览\s*[\d,，]+|阅读\s*[\d,，]+|转发\s*[\d,，]+|播放\s*[\d,，]+)/)?.[0] ??
     '';
 
+  // 侵权时间: 只认 "事实与理由" 段句首日期或 "于X年X月X日发布…" 侵权动词语境,
+  // 抓不到就留空 — 宁可缺数据也不误报年份 (诉讼时效反点依赖此字段)
+  const timeMatch =
+    section.match(/(?:^|[。\n])\s*(\d{4}\s*年(?:\s*\d{1,2}\s*月(?:\s*\d{1,2}\s*日)?)?)/) ??
+    section.match(/于\s*(\d{4}\s*年(?:\s*\d{1,2}\s*月(?:\s*\d{1,2}\s*日)?)?)\s*(?:发布|发表|撰写|发帖|上传|转发)/);
+
   return {
     tortMethod,
     tortContent: tortContent.slice(0, 500),
     spread,
+    time: timeMatch && timeMatch[1] ? timeMatch[1].replace(/\s+/g, ' ').trim() : undefined,
   };
+}
+
+/**
+ * 起诉日期 — 优先 "此致" 之后的落款 (具状人/起诉人 + 年月日),
+ * 兜底 "于 X 年 X 月 X 日提起(本)诉" 字样
+ */
+function extractFilingDate(text: string): string | undefined {
+  const fmt = (m: RegExpMatchArray): string => {
+    const y = m[1]!;
+    const mo = m[2] ? m[2].padStart(2, '0') : undefined;
+    const d = m[3] ? m[3].padStart(2, '0') : undefined;
+    if (mo && d) return `${y}-${mo}-${d}`;
+    if (mo) return `${y}-${mo}`;
+    return y;
+  };
+  const refIdx = text.lastIndexOf('此致');
+  const tail = refIdx >= 0 ? text.slice(refIdx) : text.slice(-400);
+  let m = tail.match(/(\d{4})\s*年\s*(\d{1,2})\s*月\s*(\d{1,2})\s*日/);
+  if (m) return fmt(m);
+  m = tail.match(/(\d{4})\s*年\s*(\d{1,2})\s*月/);
+  if (m) return fmt(m);
+  m = text.match(/于\s*(\d{4})\s*年\s*(\d{1,2})\s*月(?:\s*(\d{1,2})\s*日)?\s*(?:提起|起诉)/);
+  if (m) return fmt(m);
+  return undefined;
 }
 
 function extractEvidence(text: string): ParsedEvidence[] {

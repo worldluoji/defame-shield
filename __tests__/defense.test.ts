@@ -151,6 +151,30 @@ describe('generateDefense (draft 模式)', () => {
     expect(r.content).not.toMatch(/（\d{4}）/);
   });
 
+  it('起诉状无明确侵权时间 → 答辩状不含 "超过诉讼时效" 断言', async () => {
+    const a = await analyzeComplaint(SAMPLE_COMPLAINT, { draft: true });
+    if (!a.ok) throw new Error('analyze fail');
+    const r = await generateDefense({ analysis: a.analysis, case: SAMPLE_CASE, draft: true });
+    if (!r.ok) throw new Error('gen fail');
+    expect(r.content).not.toContain('超过诉讼时效');
+    expect(r.strategies.some((s) => s.id === 'statute-limitations')).toBe(false);
+  });
+
+  it('侵权 4 年前 + 落款起诉日期 → 时效反点触发且填入真实时间', async () => {
+    const oldComplaint = SAMPLE_COMPLAINT
+      .replace(
+        '被告通过微博账号 @李四微博 发布侵权内容为"张三是个骗子"等。',
+        '2021 年 3 月 15 日, 被告通过微博账号 @李四微博 发布侵权内容为"张三是个骗子"等。',
+      )
+      .replace('北京市东城区人民法院\n', '北京市东城区人民法院\n\n具状人：张三\n\n2025 年 9 月 10 日\n');
+    const a = await analyzeComplaint(oldComplaint, { draft: true });
+    if (!a.ok) throw new Error('analyze fail');
+    const r = await generateDefense({ analysis: a.analysis, case: SAMPLE_CASE, draft: true });
+    if (!r.ok) throw new Error('gen fail');
+    expect(r.content).toContain('超过诉讼时效');
+    expect(r.content).toContain('2025-09-10');
+  });
+
   it('保留待补充标记', async () => {
     const a = await analyzeComplaint(SAMPLE_COMPLAINT, { draft: true });
     if (!a.ok) throw new Error('analyze fail');

@@ -141,6 +141,11 @@ export function applyFixes(
         notes.push(`跳过未知策略 ID: ${String(v.strategyId)}`);
         continue;
       }
+      // 时效断言必须有确凿数据 (侵权时间+起诉时间间隔 > 3 年), 否则禁止注入
+      if (v.id === 'missing-statute-limitations' && strategy.applicability(analysis) < 0.6) {
+        notes.push('跳过 missing-statute-limitations: 拆解结果无法确认时效确已届满, 不注入时效断言');
+        continue;
+      }
       const section = renderProceduralDefense(strategy, caseContext);
       patched = injectAfter(patched, '## 总体答辩策略', section);
       injected++;

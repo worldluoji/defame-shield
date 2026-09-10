@@ -52,6 +52,8 @@ const SAMPLE_COMPLAINT = `# 民事起诉状
 
 具状人：张三
 
+2025 年 9 月 10 日
+
 `;
 
 describe('analyzeComplaint (draft 模式)', () => {
@@ -168,6 +170,24 @@ describe('扩字段 (C)', () => {
     const res = await analyzeComplaint(SAMPLE_COMPLAINT, { draft: true });
     if (!res.ok) throw new Error('fail');
     expect(res.analysis.courtOfFiling).toBe('北京市东城区人民法院');
+  });
+
+  it('draft 抽取侵权时间 (事实段句首日期)', async () => {
+    const res = await analyzeComplaint(SAMPLE_COMPLAINT, { draft: true });
+    if (!res.ok) throw new Error('fail');
+    expect(res.analysis.facts.time).toBe('2025 年 5 月 1 日');
+  });
+
+  it('draft 抽取起诉日期 (落款)', async () => {
+    const res = await analyzeComplaint(SAMPLE_COMPLAINT, { draft: true });
+    if (!res.ok) throw new Error('fail');
+    expect(res.analysis.filingDate).toBe('2025-09-10');
+  });
+
+  it('无落款日期时 filingDate 为空', async () => {
+    const res = await analyzeComplaint(SAMPLE_COMPLAINT.replace(/\n*2025 年 9 月 10 日\n*/, '\n'), { draft: true });
+    if (!res.ok) throw new Error('fail');
+    expect(res.analysis.filingDate).toBeUndefined();
   });
 
   it('legalBasisItems 结构化 (含 category/article)', async () => {

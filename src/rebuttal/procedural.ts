@@ -8,6 +8,7 @@
  * 抽出独立文件: 避免 TS 推导 STRATEGIES 时遗漏
  */
 import type { RebuttalStrategy, StrategyId } from './strategies-base.js';
+import { parseLooseDate, elapsedYears } from '../utils/dates.js';
 
 export const PROCEDURAL_STRATEGIES: Record<'statute-limitations' | 'jurisdiction' | 'wrong-party', RebuttalStrategy> = {
   'statute-limitations': {
@@ -15,18 +16,14 @@ export const PROCEDURAL_STRATEGIES: Record<'statute-limitations' | 'jurisdiction
     name: '超过诉讼时效',
     description: '原告的起诉已超过民法典规定的 3 年诉讼时效期间, 依法应驳回诉讼请求',
     applicability: (a) => {
-      // 优先用 facts.time, 兜底用 tortContent
-      const haystack = `${a.facts.time ?? ''} ${a.facts.tortContent ?? ''}`;
-      const yearMatch = haystack.match(/(\d{4})\s*年/);
-      if (yearMatch && yearMatch[1]) {
-        const tortYear = parseInt(yearMatch[1], 10);
-        const currentYear = new Date().getFullYear();
-        const yearsAgo = currentYear - tortYear;
-        if (yearsAgo > 3) return 0.95;
-        if (yearsAgo > 2) return 0.6;
-        if (yearsAgo > 1) return 0.3;
-      }
-      return 0.1;
+      // 严格触发: 只信任 facts.time (tortContent 里的年份与侵权时间无必然关系),
+      // 且必须能同时解析出侵权时间和起诉日期, 保守计算确超 3 年才启用。
+      // 任何数据不足的情况返回 < 0.3, 使本反点既进不了 top-3 也不触发一票否决。
+      const tort = parseLooseDate(a.facts.time ?? '');
+      if (!tort) return 0.1;
+      const filing = parseLooseDate(a.filingDate ?? '');
+      if (!filing) return 0.2;
+      return elapsedYears(tort, filing) > 3 ? 0.95 : 0.15;
     },
     template: `原告的起诉**已超过法律规定的诉讼时效期间**, 依法应驳回其全部诉讼请求。
 

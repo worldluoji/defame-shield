@@ -45,6 +45,10 @@ const SAMPLE_COMPLAINT = `# 民事起诉状
 此致
 
 北京市东城区人民法院
+
+具状人：张三
+
+2025 年 9 月 10 日
 `;
 
 const SAMPLE_CASE: Case = {

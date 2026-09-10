@@ -86,9 +86,10 @@ describe('STRATEGIES 库完整性', () => {
 });
 
 describe('程序性反点 (一票否决性)', () => {
-  it('诉讼时效: 侵权 4 年前 → 适用度 >= 0.6', () => {
+  it('诉讼时效: 侵权 4 年前 + 有起诉日期 → 适用度 >= 0.6', () => {
     const a = mkAnalysis({
       facts: { tortMethod: '微博', tortContent: '内容', spread: '', time: '2021 年 3 月' },
+      filingDate: '2025-06-01',
     });
     const s = STRATEGIES['statute-limitations'];
     expect(s.applicability(a)).toBeGreaterThanOrEqual(0.6);
@@ -98,14 +99,40 @@ describe('程序性反点 (一票否决性)', () => {
     const currentYear = new Date().getFullYear();
     const a = mkAnalysis({
       facts: { tortMethod: '微博', tortContent: '内容', spread: '', time: `${currentYear} 年 1 月` },
+      filingDate: `${currentYear}-06-01`,
     });
     const s = STRATEGIES['statute-limitations'];
     expect(s.applicability(a)).toBeLessThan(0.5);
   });
 
+  it('诉讼时效: 无 facts.time 但侵权内容含年份 → 不触发 (不误抓无关年份)', () => {
+    const a = mkAnalysis({
+      facts: { tortMethod: '微博', tortContent: '原告称 2019 年起其声誉受损', spread: '' },
+      filingDate: '2025-06-01',
+    });
+    expect(STRATEGIES['statute-limitations'].applicability(a)).toBeLessThan(0.3);
+  });
+
+  it('诉讼时效: 缺起诉日期 → 无法判断届满, 不触发', () => {
+    const a = mkAnalysis({
+      facts: { tortMethod: '微博', tortContent: '内容', spread: '', time: '2019 年 3 月' },
+    });
+    expect(STRATEGIES['statute-limitations'].applicability(a)).toBeLessThan(0.3);
+  });
+
+  it('诉讼时效: 未超期 (2025 侵权 / 2026 起诉) → 不进 top-3 总体反点', () => {
+    const a = mkAnalysis({
+      facts: { tortMethod: '微博', tortContent: '张三是个骗子', spread: '', time: '2025 年 6 月' },
+      filingDate: '2025-09-10',
+    });
+    const picked = selectStrategies(a, 3);
+    expect(picked.some((s) => s.id === 'statute-limitations')).toBe(false);
+  });
+
   it('selectStrategyForClaim: 诉讼时效 4 年前 → 一票否决', () => {
     const a = mkAnalysis({
       facts: { tortMethod: '微博', tortContent: '内容', spread: '', time: '2021 年 3 月' },
+      filingDate: '2025-06-01',
       elementScore: { ...mkAnalysis().elementScore, damage: 'strong' }, // 即使损害充分, 也优先时效
     });
     const claim = a.claims[0]!; // stop_infringement
@@ -124,6 +151,7 @@ describe('程序性反点 (一票否决性)', () => {
     // 即使事实 likely_true (高分), 如果诉讼时效 4 年, 仍选 statute-limitations
     const a = mkAnalysis({
       facts: { tortMethod: '微博', tortContent: '内容', spread: '', time: '2021 年 3 月' },
+      filingDate: '2025-06-01',
       elementScore: { ...mkAnalysis().elementScore, factAuthenticity: 'likely_true' },
     });
     const s = selectStrategyForClaim(a.claims[0]!, a);
