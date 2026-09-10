@@ -44,3 +44,6 @@ coverage/
 
 .claude/settings.local.json
 .claude/.claude-model-switch-active.json
+
+data/cases/*/outputs/*.md
+data/cases/case-*
