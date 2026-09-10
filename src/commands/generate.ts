@@ -83,7 +83,7 @@ async function generateDefenseFromAnalysis(flags: GenerateFlags): Promise<void> 
   const config = loadConfig();
   const c = flags.case ? loadCase(config, flags.case) : null;
   if (!c) {
-    die(`--from-analysis 生成答辩状必须同时指定 --case <id> (提供被告方信息)`);
+    die(`--from-analysis 生成答辩状必须同时指定 --case <id> (提供被告方信息)\n  建案: dsh case new <id> && dsh analyze-complaint 起诉状.md --case <id> (自动回填原告/诉请/事实)`);
   }
 
   const outDir = outputsDir(config, c.id);

@@ -11,7 +11,7 @@ import { DocumentConverter } from '../converters/document-converter.js';
 import { detectFormat } from '../converters/format-detector.js';
 import { out, die } from '../utils/console.js';
 import { loadConfig } from '../config/config.js';
-import { caseDir } from '../case/case.js';
+import { caseDir, loadCase, mergeAnalysisIntoCase, updateCase } from '../case/case.js';
 
 export interface AnalyzeFlags {
   draft?: boolean;
@@ -75,6 +75,18 @@ export async function analyzeComplaintCommand(input: string, flags: AnalyzeFlags
   writeOutput(outPath, result.analysis);
 
   out.success(`已生成拆解结果: ${outPath}`);
+
+  // --case 且 case.json 已存在: 自动回填原告/诉请/事实/法院, 免去手动录入
+  if (flags.case) {
+    const config = loadConfig();
+    const existing = loadCase(config, flags.case);
+    if (existing) {
+      updateCase(config, mergeAnalysisIntoCase(existing, result.analysis));
+      out.success(`已回填 case.json: 原告 ${result.analysis.parties.原告.name || '(未识别)'} / 诉请 ${result.analysis.claims.length} 条 / 法院 ${result.analysis.courtOfFiling ?? '(未识别)'}`);
+    } else {
+      out.info(`该目录尚无 case.json — 运行 \`dsh case new ${flags.case}\` 建案后重新拆解可自动回填当事人信息`);
+    }
+  }
 
   if (!flags.silent) {
     // 控制台也输出摘要
