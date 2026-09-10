@@ -53,7 +53,7 @@ config
 const caseCmd = program.command('case').description('案件管理');
 caseCmd
   .command('new <id>')
-  .description('创建案件 (交互式填写当事人/事实)')
+  .description('创建案件 (只填被告侧信息; 原告/诉请/事实由 analyze-complaint --case 拆解起诉状自动回填)')
   .action(caseNewCommand);
 caseCmd.command('list').description('列出所有案件').action(caseListCommand);
 caseCmd
@@ -129,7 +129,12 @@ genCmd
   .option('--from-analysis <path>', '[仅 defense] 从拆解结果 JSON 生成答辩状')
   .action(generateCommand);
 
-program.parseAsync(process.argv).catch((err) => {
+// pnpm run 会把 `--` 原样透传给脚本, commander 遇 `--` 停止解析选项 (--draft 等失效), 剥掉首个
+const argv = process.argv[2] === '--'
+  ? [...process.argv.slice(0, 2), ...process.argv.slice(3)]
+  : process.argv;
+
+program.parseAsync(argv).catch((err) => {
   out.error((err as Error)?.message || String(err));
   process.exit(1);
 });

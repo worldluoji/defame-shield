@@ -9,7 +9,7 @@
   "main": "./bin/dsh.mjs",
   "scripts": {
     "start": "node bin/dsh.mjs",
-    "dev": "tsx bin/dsh.mjs",
+    "dev": "tsx src/cli.ts",
     "test": "vitest run",
     "test:watch": "vitest",
     "typecheck": "tsc --noEmit",
