@@ -13,7 +13,7 @@ defame-shield (`dsh`):中文民事名誉权诉讼文书生成 CLI。**核心场�
 ```bash
 ./scripts/setup.sh                        # 一键安装: pnpm deps + uv venv + markitdown
 pnpm dev -- <args>                        # 开发模式跑 CLI (tsx 直接执行 src/cli.ts, 无需 build)
-pnpm test                                 # vitest (~111 个用例, <1s, 不发任何网络请求)
+pnpm test                                 # vitest (~135 个用例, <1s, 不发任何网络请求)
 pnpm test __tests__/simulator.test.ts     # 单测文件
 pnpm test -t "用例名关键字"                # 单个用例
 pnpm typecheck                            # tsc --noEmit

@@ -61,6 +61,8 @@ DEEPSEEK_API_KEY=sk-你的key
 dsh case new def-sample-001
 ```
 
+只问被告侧信息 (当事人姓名必填, 地址/证件号/律师等选填) — 原告/诉请/事实/法院**不用手填**, 下一步拆解起诉状后自动回填。
+
 ### 5. 拆解原告起诉状
 
 把起诉状复制成 markdown,保存到 `data/cases/sample-001/complaint.md`,然后:
@@ -69,7 +71,7 @@ dsh case new def-sample-001
 dsh analyze-complaint data/cases/sample-001/complaint.md --case def-sample-001 --draft
 ```
 
-输出: `data/cases/def-sample-001/complaint-analysis.json` (拆解结果)
+输出: `data/cases/def-sample-001/complaint-analysis.json` (拆解结果), 同时自动回填 `case.json` 的原告/诉请/事实/法院。
 
 ### 6. 生成答辩状 (基于拆解)
 
@@ -128,7 +130,7 @@ dsh generate evidence-list --case sample-001
 dsh init                                            初始化项目
 dsh config show                                     显示配置
 dsh config set <key> <value>                        修改配置
-dsh case new <id>                                   创建案件
+dsh case new <id>                                   创建案件 (只填被告侧, 其余由拆解回填)
 dsh case list                                       列出案件
 dsh case show <id>                                  查看案件详情
 dsh convert <file>                                  PDF/Word/PPT/Excel → markdown (需 MarkItDown)
@@ -177,7 +179,7 @@ defame-shield/
 
 ## LLM Provider
 
-- **deepseek** (默认) — `https://api.deepseek.com/chat/completions`, model: `deepseek-chat`
+- **deepseek** (默认) — `https://api.deepseek.com/chat/completions`, model: `deepseek-flash`
 - **minimax** — `https://api.minimax.chat/v1/text/chatcompletion_v2`, model: `MiniMax-M3`
 
 切换:`MODEL_PROVIDER=minimax` + `MINIMAX_API_KEY=...` 即可。
@@ -185,7 +187,7 @@ defame-shield/
 ## 调试
 
 ```bash
-# 单元测试 (111 个, < 1s)
+# 单元测试 (135 个, < 1s)
 pnpm test
 
 # 类型检查

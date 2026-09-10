@@ -15,7 +15,7 @@ export interface ModelConfig {
 export const AI_MODELS: Record<ModelProvider, ModelConfig> = {
   deepseek: {
     endpoint: 'https://api.deepseek.com/chat/completions',
-    model: 'deepseek-chat',
+    model: 'deepseek-flash',
     apiKeyEnv: 'DEEPSEEK_API_KEY',
     defaultTimeoutMs: 90_000,
   },
