@@ -20,7 +20,7 @@ dsh 在案件目录 `data/cases/<id>/` 里流转 3 类文件。**搞清归属,�
 | 文件 | 谁的 | 产生方式 | 被谁消费 |
 |---|---|---|---|
 | `complaint.md` | **原告** (起诉状) | 律师誊抄, 或 `dsh convert` 从 PDF/Word 转换 | `analyze-complaint` |
-| `complaint-analysis.json` | 中性 — 原告主张的**结构化拆解** (主体/诉请/事实/证据 + 四要件评分) | `dsh analyze-complaint` | `generate defense --from-analysis`、`self-check --analysis`、`simulate --analysis`、`apply-fixes --analysis` |
+| `complaint-analysis.json` | 中性 — 原告主张的**结构化拆解** (主体/诉请/事实/证据 + 四要件评分) | `dsh analyze-complaint`; 事实缺口用 `dsh fill` 回填 (留 `_fillLog` 审计) | `generate defense --from-analysis`、`self-check --analysis`、`simulate --analysis`、`apply-fixes --analysis` |
 | `outputs/defense-*.md` | **被告** (答辩状) | `dsh generate defense` | 提交法院前的润色链: `self-check <defense>` → `apply-fixes <defense>` → `simulate <defense>` → `export-pdf` |
 
 两个高频参数一句话:
@@ -33,7 +33,7 @@ dsh 在案件目录 `data/cases/<id>/` 里流转 3 类文件。**搞清归属,�
                                                               │ (自动回填 case.json 原告/诉请/事实/法院)
                                           generate defense ───┴─▶ defense-*.md   ◀── 被告的稿子
                                                                     │
-                                            self-check (站原告视角挑漏洞) ─▶ apply-fixes / fill-defense
+                                fill (事实缺口回填 JSON→重生成) / self-check (挑漏洞) ─▶ apply-fixes / fill-defense
                                                                     │
                                             simulate (原被告多轮交锋, 胜诉概率轨迹) ─▶ export-pdf ─▶ 提交法院
 ```
@@ -113,8 +113,11 @@ dsh generate defense --case def-001 \
 dsh self-check data/cases/def-001/outputs/defense-<时间戳>.md \
   --analysis data/cases/def-001/complaint-analysis.json
 
-# ⑤ 修补: critical/high 漏洞的对策自动注入 (程序性反点仅在拆解能确证时才注入, 宁缺毋滥)
-#    或直接改稿: dsh fill-defense defense-<时间戳>.md  (交互式逐项填 [待补充] 占位符)
+# ⑤ 回填事实 + 修补:
+#    事实缺口补进拆解 JSON (唯一事实源, 重生成不丢, 留 _fillLog 审计):
+dsh fill data/cases/def-001/complaint-analysis.json --set "facts.time=2026-03-12" --allow-new
+#    然后重跑 ③, 再注入修补 (程序性反点仅在拆解能确证时才注入, 宁缺毋滥;
+#    目标 patched 已存在时会拒绝覆盖, 确认后加 --yes; 人工改稿用 fill-defense 交互式填充)
 dsh apply-fixes data/cases/def-001/outputs/defense-<时间戳>.md \
   --analysis data/cases/def-001/complaint-analysis.json
 #    → defense-<时间戳>-patched.md
@@ -195,7 +198,10 @@ dsh self-check <defense> --analysis <json> [选项]   站原告视角挑漏洞 (
   --severe-only          仅显示 critical/high       --out <json>  落盘漏洞清单
 dsh apply-fixes <defense> --analysis <json> [选项]  修补建议自动注入 → *-patched.md
   --critical-only        仅注入 critical            --vulnerabilities <json>  复用已有清单
-dsh fill-defense <file> [--out]                     交互式填充 [待补充] 占位符
+  --yes                  目标 patched 已存在时确认覆盖 (默认拒绝并给分流指引)
+dsh fill <analysis.json> [选项]                     非交互回填拆解 JSON 字段 (补事实的唯一通道)
+  --set "路径=值" (可重复)  --from <json>  --allow-new  --out <path>
+dsh fill-defense <file> [--out]                     交互式填充 [待补充] 占位符 (文书层, 人工润色)
 dsh simulate <defense> --analysis <json> [选项]     攻防推演 → 胜诉概率轨迹 (rule/ai)
   --case <id>  --rounds <n>  --mode <rule|ai>  --out <json>
 dsh export-pdf <file> [--out|--case-number|--title] markdown → PDF (法院文书排版)
@@ -203,10 +209,14 @@ dsh export-pdf <file> [--out|--case-number|--title] markdown → PDF (法院文�
 
 > `<defense>` = 答辩状 md 路径 (generate defense 的产物);`--analysis` = 拆解 JSON 路径。二者见上文数据流表。
 
+## Agent 模式 (不想记命令)
+
+仓库自带 [Agent Skills](https://agentskills.io) 标准技能 `.agents/skills/dsh-respond/SKILL.md`: 在仓库根启动 [pi](https://pi.dev) (或接入 Claude Code 等兼容 harness) 并信任项目后, 直接说「这是起诉状 PDF, 帮我出答辩状」即可 — agent 按技能跑完上面 7 步, 并逐个追问事实缺口 (`dsh fill` 回填)。dsh 仍是法律内容的唯一事实源, agent 只编排交互。启用与约定见 [.agents/skills/README.md](.agents/skills/README.md)。
+
 ## 开发
 
 ```bash
-pnpm test                # 160 个单元测试, <1s, 不发任何网络请求 (只测 draft/rule 模式)
+pnpm test                # 170 个单元测试, <1s, 不发任何网络请求 (只测 draft/rule 模式)
 pnpm test __tests__/simulator.test.ts
 pnpm typecheck && pnpm lint && pnpm build
 ```

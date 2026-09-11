@@ -13,7 +13,7 @@ defame-shield (`dsh`):中文民事名誉权诉讼文书生成 CLI。**核心场�
 ```bash
 ./scripts/setup.sh                        # 一键安装: pnpm deps + uv venv + markitdown
 pnpm dev -- <args>                        # 开发模式跑 CLI (tsx 直接执行 src/cli.ts, 无需 build)
-pnpm test                                 # vitest (~135 个用例, <1s, 不发任何网络请求)
+pnpm test                                 # vitest (~170 个用例, <1s, 不发任何网络请求)
 pnpm test __tests__/simulator.test.ts     # 单测文件
 pnpm test -t "用例名关键字"                # 单个用例
 pnpm typecheck                            # tsc --noEmit
@@ -32,9 +32,10 @@ smoke 测试可用现成样本:`data/cases/def-sample-001/`(被告视角,含 com
 complaint.pdf/docx ─(convert: markitdown)→ complaint.md
   ─(analyze-complaint)→ complaint-analysis.json
   ─(generate defense --from-analysis)→ outputs/defense-*.md
-  ─(self-check → apply-fixes)→ defense-patched.md
+  ─(self-check → apply-fixes)→ defense-patched.md   # apply-fixes 目标已存在需 --yes 才覆盖
   ─(simulate: 攻防推演) / (export-pdf)
-```
+
+事实缺口: dsh fill <analysis.json> --set/--from 回填 (唯一事实源, 留 _fillLog; 改完重跑 generate)
 
 模块分工:
 
@@ -66,6 +67,7 @@ complaint.pdf/docx ─(convert: markitdown)→ complaint.md
 ## 文档
 
 - `README.md` — 5 分钟上手 + 命令一览 + 5 反点表
+- `.agents/skills/` — Agent Skills 标准技能 (pi 等 agent 的对话式入口; dsh 仍是法律内容唯一事实源)
 - `docs/答辩工作流.md` — 端到端工作流程(拿到起诉状 → 提交法院)
 - `docs/法律免责声明.md` — 使用边界
 - `docs/todo.md` — backlog(方向 1 证据存证 / 方向 4 法律检索 / 方向 5)
