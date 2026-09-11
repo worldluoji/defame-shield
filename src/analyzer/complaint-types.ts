@@ -139,6 +139,19 @@ export interface ComplaintAnalysis {
   courtOfFiling?: string;
   /** 案号 (扩字段 C, 通常起诉状不含) */
   caseNumber?: string;
+  /** dsh fill 回填审计痕迹 (按时间追加, 不覆盖) */
+  _fillLog?: FillLogEntry[];
+}
+
+/** 单条回填审计记录 */
+export interface FillLogEntry {
+  /** 点路径, 如 parties.被告.name */
+  path: string;
+  /** 回填前的值 (新增根级字段时为空) */
+  previous?: string | number | boolean | null;
+  value: string | number | boolean;
+  /** ISO 时间戳 */
+  filledAt: string;
 }
 
 /** 拆解选项 */

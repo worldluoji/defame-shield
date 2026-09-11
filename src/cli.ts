@@ -24,6 +24,7 @@ import { generateCommand } from './commands/generate.js';
 import { analyzeComplaintCommand } from './commands/analyze.js';
 import { selfCheckCommand } from './commands/self-check.js';
 import { fillDefenseCommand } from './commands/fill-defense.js';
+import { fillAnalysisCommand } from './commands/fill-analysis.js';
 import { exportPdfCommand } from './commands/export-pdf.js';
 import { applyFixesCommand } from './commands/apply-fixes.js';
 import { simulateCommand } from './commands/simulate.js';
@@ -77,10 +78,19 @@ fillCmd
   .option('--out <path>', '输出路径 (默认: <原名>-filled.md)')
   .action(fillDefenseCommand);
 
+const fillJsonCmd = program.command('fill <analysis>').description('非交互回填拆解 JSON 字段 (点路径=值, 留 _fillLog 审计; 供 agent/批量使用)');
+fillJsonCmd
+  .option('--set <path=value>', '回填一项, 可重复 (如 --set "facts.time=2026-03-12")', (v: string, acc: string[]) => [...acc, v], [])
+  .option('--from <json>', '批量回填文件: {路径: 值} 或 [{path, value, note?}]')
+  .option('--allow-new', '允许新增 JSON 中尚不存在的末端字段 (父级路径须已存在; 如 draft 未产出的 filingDate)', false)
+  .option('--out <path>', '输出路径 (默认: 原地写回)')
+  .action(fillAnalysisCommand);
+
 const applyCmd = program.command('apply-fixes <defense>').description('自检修补建议自动注入答辩状');
 applyCmd
   .requiredOption('--analysis <json>', '拆解结果 JSON 路径')
-  .option('--out <path>', '输出路径 (默认: <原名>-patched.md)')
+  .option('--out <path>', '输出路径 (默认: <原名>-patched.md; 目标已存在时需 --yes 确认覆盖)')
+  .option('--yes', '目标 patched 文件已存在时确认覆盖', false)
   .option('--critical-only', '仅注入 critical 风险', false)
   .option('--vulnerabilities <json>', '使用已有漏洞列表, 跳过 self-check')
   .action(applyFixesCommand);
