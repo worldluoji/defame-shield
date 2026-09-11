@@ -1,8 +1,8 @@
-# 民事名誉诉讼文书生成 CLI
+# dsh — 民事名誉权诉讼文书生成 CLI
 
-> **核心场景: 民事名誉权纠纷 - 被告应诉** (拆解原告起诉状 → 5 个反点逐条反驳)
-> 同时支持 4 种律师常用法律文书的本地化生成:律师函 / 民事起诉状 / 民事答辩状 / 证据目录
-> 支持 LLM 增强润色 + 纯模板(draft) 模式,中文 CLI,纯本地部署。
+> **核心场景: 民事名誉权纠纷 - 被告应诉** (拆解原告起诉状 → 5 实体 + 3 程序反点逐条反驳 → 生成答辩状)
+> 兼顾律师 4 种常用文书的本地化生成: 律师函 / 民事起诉状 / 民事答辩状 / 证据目录。
+> LLM 增强 + 纯模板 (`--draft`) 双模式, 中文 CLI, 纯本地部署, 无数据库。
 
 ## 重要法律声明
 
@@ -12,6 +12,31 @@
 - **重大、复杂案件请务必咨询执业律师**
 - 使用本工具生成的文书造成的法律后果,由使用者自行承担
 - 详见 [docs/法律免责声明.md](docs/法律免责声明.md)
+
+## 先看数据流: 每份文件是谁的
+
+dsh 在案件目录 `data/cases/<id>/` 里流转 3 类文件。**搞清归属,所有命令的参数就好记了**:
+
+| 文件 | 谁的 | 产生方式 | 被谁消费 |
+|---|---|---|---|
+| `complaint.md` | **原告** (起诉状) | 律师誊抄, 或 `dsh convert` 从 PDF/Word 转换 | `analyze-complaint` |
+| `complaint-analysis.json` | 中性 — 原告主张的**结构化拆解** (主体/诉请/事实/证据 + 四要件评分) | `dsh analyze-complaint` | `generate defense --from-analysis`、`self-check --analysis`、`simulate --analysis`、`apply-fixes --analysis` |
+| `outputs/defense-*.md` | **被告** (答辩状) | `dsh generate defense` | 提交法院前的润色链: `self-check <defense>` → `apply-fixes <defense>` → `simulate <defense>` → `export-pdf` |
+
+两个高频参数一句话:
+
+- **`<defense>`** (self-check / apply-fixes / simulate 的位置参数) = 答辩状文件路径,即上表第三行。**只有被告有答辩状** — 这三步都是"拿着被告的稿子做文章"。
+- **`--analysis`** = 拆解结果 JSON 路径,即上表第二行。自检/推演需要它,才知道原告主张了什么、被告漏没漏。
+
+```
+起诉状.pdf ──convert──▶ complaint.md ──analyze-complaint──▶ complaint-analysis.json
+                                                              │ (自动回填 case.json 原告/诉请/事实/法院)
+                                          generate defense ───┴─▶ defense-*.md   ◀── 被告的稿子
+                                                                    │
+                                            self-check (站原告视角挑漏洞) ─▶ apply-fixes / fill-defense
+                                                                    │
+                                            simulate (原被告多轮交锋, 胜诉概率轨迹) ─▶ export-pdf ─▶ 提交法院
+```
 
 ## 5 分钟上手
 
@@ -37,6 +62,13 @@ pnpm dev -- <args>                       # 开发模式 (tsx, 无需 build)
 pnpm build && node bin/dsh.mjs <args>    # build 后直接跑
 ```
 
+需要 PDF/Word 转换 (`convert` / `analyze-complaint *.pdf`) 的话,再装一次 Python 侧组件:
+
+```bash
+./scripts/setup.sh         # 一键: pnpm deps + uv venv + Microsoft MarkItDown
+dsh convert --check        # 验证 markitdown 可用
+```
+
 ### 2. 初始化项目
 
 ```bash
@@ -53,60 +85,73 @@ MODEL_PROVIDER=deepseek
 DEEPSEEK_API_KEY=sk-你的key
 ```
 
-> 不填 key 也能用 `--draft` 纯模板模式, 只是没有 LLM 润色。
+> 不填 key 也能用 `--draft` 纯模板模式, 只是没有 LLM 润色; 所有命令离线可用。
 
-### 4. 创建案件 (被告视角)
+---
 
-```bash
-dsh case new def-sample-001
-```
+### 场景 A: 你是被告 (收到起诉状, 要交答辩状)
 
-只问被告侧信息 (当事人姓名必填, 地址/证件号/律师等选填) — 原告/诉请/事实/法院**不用手填**, 下一步拆解起诉状后自动回填。
-
-### 5. 拆解原告起诉状
-
-把起诉状复制成 markdown,保存到 `data/cases/sample-001/complaint.md`,然后:
+完整 7 步,每步产物是下一步的输入:
 
 ```bash
-dsh analyze-complaint data/cases/sample-001/complaint.md --case def-sample-001 --draft
-```
+# ① 建案 — 只问被告侧信息 (当事人必填; 地址/律师等选填)。
+#    原告/诉请/事实/法院不用手填, ② 拆解起诉状后自动回填。
+dsh case new def-001
 
-输出: `data/cases/def-sample-001/complaint-analysis.json` (拆解结果), 同时自动回填 `case.json` 的原告/诉请/事实/法院。
+# ② 拆解起诉状 (站原告视角, 把主张拆成结构化 JSON + 四要件评分)
+#    .pdf/.docx 自动先转 markdown; --draft = 纯正则, 不调 LLM
+dsh analyze-complaint 起诉状.pdf --case def-001 --draft
+#    → data/cases/def-001/complaint-analysis.json
 
-### 6. 生成答辩状 (基于拆解)
-
-```bash
-dsh generate defense --case def-sample-001 \
-  --from-analysis data/cases/def-sample-001/complaint-analysis.json \
+# ③ 生成答辩状 (站被告视角, 8 反点自动选型: 每条诉请匹配最适反点)
+dsh generate defense --case def-001 \
+  --from-analysis data/cases/def-001/complaint-analysis.json \
   --draft
-```
+#    → data/cases/def-001/outputs/defense-<时间戳>.md   ← 后面命令里的 <defense> 就是它
 
-输出: `data/cases/def-sample-001/outputs/defense-<时间戳>.md`
+# ④ 自检: 换位到原告律师, 攻击你刚写的答辩状, 列出漏洞清单
+dsh self-check data/cases/def-001/outputs/defense-<时间戳>.md \
+  --analysis data/cases/def-001/complaint-analysis.json
+
+# ⑤ 修补: critical/high 漏洞的对策自动注入 (程序性反点仅在拆解能确证时才注入, 宁缺毋滥)
+#    或直接改稿: dsh fill-defense defense-<时间戳>.md  (交互式逐项填 [待补充] 占位符)
+dsh apply-fixes data/cases/def-001/outputs/defense-<时间戳>.md \
+  --analysis data/cases/def-001/complaint-analysis.json
+#    → defense-<时间戳>-patched.md
+
+# ⑥ 攻防推演: 模拟原被告多轮交锋, 输出被告胜诉概率轨迹与下一步建议
+dsh simulate data/cases/def-001/outputs/defense-<时间戳>-patched.md \
+  --analysis data/cases/def-001/complaint-analysis.json --case def-001
+
+# ⑦ 导出法院排版 PDF
+dsh export-pdf data/cases/def-001/outputs/defense-<时间戳>-patched.md
+```
 
 **答辩状包含**:
-- ✅ 总体答辩策略 (按杀伤力排序的 3 个反点)
+- ✅ 总体答辩策略 (按杀伤力排序的 top-3 反点)
 - ✅ 逐条诉请反驳 (每条匹配最适反点 + 法律依据)
 - ✅ 类案参考 (裁判要点式, 不编案号)
 - ✅ 答辩证据指引 (基于反点, 提示需补充的证据)
-- ✅ 待补充标记 (提示律师补充案件特有事实)
+- ✅ 待补充标记 (`[待补充: ...]`, 提示律师补案件特有事实 — 工具绝不虚构)
 
-## 4 种文书生成 (基础)
+端到端细节见 [docs/答辩工作流.md](docs/答辩工作流.md);现成样本 `data/cases/def-sample-001/` 可对照。
+
+### 场景 B: 你是原告 (起诉方的基础文书)
+
+起诉状、律师函、证据目录走模板生成,不经过拆解链路:
 
 ```bash
-# 律师函
-dsh generate letter --case sample-001
-
-# 民事起诉状 (原告视角)
-dsh generate complaint --case sample-001
-
-# 民事答辩状 (被告视角, 走拆解流程效果更好)
-dsh generate defense --case sample-001
-
-# 证据目录
-dsh generate evidence-list --case sample-001
+dsh generate letter         --case <id> --draft   # 律师函 (发函警告, 诉前第一步)
+dsh generate complaint      --case <id> --draft   # 民事起诉状
+dsh generate evidence-list  --case <id> --draft   # 证据目录
 ```
 
-## 5 个核心反点
+> 注意: `case new` 是按**被告应诉**场景设计的 (只问被告侧, 原告留占位符)。
+> 作为原告使用时,请手动编辑 `data/cases/<id>/case.json` 补齐原被告双方与事实/证据字段,
+> 或直接把生成的 `.md` 当模板底稿改。
+> 若被告也用了 dsh,你的起诉状会被对方 `analyze-complaint` 逐条拆解 — 诉请写法请更严谨。
+
+## 8 个核心反点
 
 答辩质量的关键,不在于"否认一切",而在于**逐条打掉原告主张的要件**。
 
@@ -120,29 +165,53 @@ dsh generate evidence-list --case sample-001
 | 4 | `no-damage` | 无损害后果 | 民法典 1183 | 未举证财产/精神损害 |
 | 5 | `no-causation` | 无因果关系 | 民法典 1024 | 损害系他因/无时间关联 |
 
-工具会根据起诉状拆解结果,自动选 1-3 个最适反点,并为每条诉请匹配最适反点。
+另有 3 个**一票否决**程序性反点,优先于实体反点参与选型:
 
-> 另有 3 个**一票否决**程序性反点 (超过诉讼时效 / 管辖异议 / 被告主体不适格),优先于实体反点,共 8 个反点参与自动选择。
+| # | 反点 ID | 反点名称 | 法条 | 触发条件 (从严, 宁缺毋滥) |
+|---|---|---|---|---|
+| 6 | `statute-limitations` | 超过诉讼时效 | 民法典 188 (995 除外) | 拆解能确认侵权→起诉间隔 > 3 年; 仅攻击损害赔偿类诉请 |
+| 7 | `jurisdiction` | 管辖异议 | 民诉法 24/130 | 有侵权行为地行政区划线索且与被告住所地不同域 |
+| 8 | `wrong-party` | 被告主体不适格 | 民法典 1191 等 | 发布平台/雇主线索 |
+
+工具根据拆解结果自动选 top-3 总体反点,并为每条诉请匹配最适反点。
+**拿不准的程序性反点不会写进文书** — 自检/修补只在拆解数据足以确证时才注入相关断言。
 
 ## 命令一览
 
 ```
-dsh init                                            初始化项目
-dsh config show                                     显示配置
-dsh config set <key> <value>                        修改配置
-dsh case new <id>                                   创建案件 (只填被告侧, 其余由拆解回填)
-dsh case list                                       列出案件
-dsh case show <id>                                  查看案件详情
-dsh convert <file>                                  PDF/Word/PPT/Excel → markdown (需 MarkItDown)
-dsh analyze-complaint <file> --case <id> [--draft]  拆解起诉状 → JSON
-dsh generate <type> --case <id> [--draft]          生成文书
-  └─ defense: --from-analysis <json> 必填
-dsh self-check <defense> --analysis <json>         抗辩自检, 模拟原告找漏洞 (rule/ai/hybrid)
-dsh apply-fixes <defense> --analysis <json>        自检修补建议自动注入答辩状
-dsh fill-defense <file>                             交互式填充 [待补充] 占位符
-dsh simulate <defense> --analysis <json>            攻防推演, 多轮交锋 + 胜诉概率轨迹
-dsh export-pdf <file>                               markdown → PDF (法院文书排版)
+dsh init                                            初始化项目 (dsh.config.json + .env.local)
+dsh config show / set <key> <value>                 查看/修改配置 (author/llmEnabled/casesDir/outputsDir)
+dsh case new <id>                                   建案 (只填被告侧; 原告侧见场景 B 注意事项)
+dsh case list / show <id>                           案件列表/详情
+dsh convert <file> [--out|--print-meta|--check]     PDF/Word/PPT/Excel → markdown (需 MarkItDown)
+dsh analyze-complaint <起诉状> [选项]               拆解 → complaint-analysis.json
+  --case <id>          输出到案件目录并自动回填 case.json (推荐)
+  --draft              纯关键词/正则抽取, 不调 LLM
+  --extra <text>       给 LLM 的补充指令      --out <path>  自定义输出路径
+dsh generate <type> --case <id> [选项]              生成文书 (letter/complaint/defense/evidence-list)
+  --from-analysis <json>   [仅 defense] 基于拆解结果的反点驱动版 (推荐)
+  --draft / --provider / --output / --extra
+dsh self-check <defense> --analysis <json> [选项]   站原告视角挑漏洞 (rule/ai/hybrid)
+  --severe-only          仅显示 critical/high       --out <json>  落盘漏洞清单
+dsh apply-fixes <defense> --analysis <json> [选项]  修补建议自动注入 → *-patched.md
+  --critical-only        仅注入 critical            --vulnerabilities <json>  复用已有清单
+dsh fill-defense <file> [--out]                     交互式填充 [待补充] 占位符
+dsh simulate <defense> --analysis <json> [选项]     攻防推演 → 胜诉概率轨迹 (rule/ai)
+  --case <id>  --rounds <n>  --mode <rule|ai>  --out <json>
+dsh export-pdf <file> [--out|--case-number|--title] markdown → PDF (法院文书排版)
 ```
+
+> `<defense>` = 答辩状 md 路径 (generate defense 的产物);`--analysis` = 拆解 JSON 路径。二者见上文数据流表。
+
+## 开发
+
+```bash
+pnpm test                # 160 个单元测试, <1s, 不发任何网络请求 (只测 draft/rule 模式)
+pnpm test __tests__/simulator.test.ts
+pnpm typecheck && pnpm lint && pnpm build
+```
+
+双模式是硬性约定: 任何 LLM 功能必须保留 `--draft`/rule 纯模板路径。
 
 ## 目录结构
 
@@ -151,51 +220,30 @@ defame-shield/
 ├── bin/                  CLI 入口
 ├── src/
 │   ├── cli.ts            commander 命令注册
-│   ├── commands/         子命令: init/config/case/analyze/generate
-│   ├── analyzer/         起诉状拆解器 (LLM + draft)
-│   ├── rebuttal/         8 个反点策略库 (5 实体 + 3 程序) + 自检/攻防推演
-│   ├── generators/       文书生成器 (含基于拆解的答辩 v2)
+│   ├── commands/         子命令薄层 (init/config/case/analyze/generate/…)
+│   ├── analyzer/         起诉状拆解器 (AI + draft 双实现)
+│   ├── rebuttal/         8 反点策略库 (5 实体 + 3 程序) + 命中检测/自检/攻防推演
+│   ├── generators/       文书生成器 (含反点驱动答辩 v2) + 模板渲染
 │   ├── converters/       文档转换 (MarkItDown 适配)
 │   ├── data/             法条登记 (23 条 + 司法解释, 离线时效检查)
 │   ├── case/             案件数据结构 + CRUD
 │   ├── config/           dsh.config.json + .env 解析
-│   ├── llm/              LLM 客户端 (deepseek/minimax)
+│   ├── llm/              LLM 客户端 (deepseek/minimax, 瞬时故障自动重试)
 │   ├── templates/        4 个 Markdown 模板
-│   └── utils/            工具函数 (PDF 导出 / 占位符等)
-├── data/
-│   └── cases/
-│       └── <case-id>/
-│           ├── case.json
-│           ├── complaint.md          (原告起诉状 markdown, 被告视角时存)
-│           ├── complaint-analysis.json (拆解结果)
-│           └── outputs/              生成的文书
-├── docs/                 法律免责声明 + 答辩工作流 + todo (方向 1/4/5)
-├── scripts/              setup.sh (一键装 Node + uv venv + markitdown)
-├── __tests__/            111 个单元测试
-├── .env.example
-├── dsh.config.json       (init 时生成)
+│   └── utils/            工具函数 (PDF 导出/占位符/JSON 等)
+├── data/cases/<case-id>/ case.json + complaint.md + complaint-analysis.json + outputs/
+├── docs/                 法律免责声明 + 答辩工作流 + todo
+├── scripts/              setup.sh (一键装依赖 + uv venv + markitdown)
+├── __tests__/            160 个单元测试
 └── package.json
 ```
 
 ## LLM Provider
 
-- **deepseek** (默认) — `https://api.deepseek.com/chat/completions`, model: `deepseek-flash`
-- **minimax** — `https://api.minimax.chat/v1/text/chatcompletion_v2`, model: `MiniMax-M3`
+- **deepseek** (默认) — model `deepseek-flash`
+- **minimax** — model `MiniMax-M3`
 
-切换:`MODEL_PROVIDER=minimax` + `MINIMAX_API_KEY=...` 即可。
-
-## 调试
-
-```bash
-# 单元测试 (135 个, < 1s)
-pnpm test
-
-# 类型检查
-pnpm typecheck
-
-# 直接用 tsx 跑
-pnpm dev -- generate defense --case def-sample-001 --draft
-```
+切换: `MODEL_PROVIDER=minimax` + `MINIMAX_API_KEY=...`。LLM 失败自动回退 draft,不会丢工作。
 
 ## License
 
