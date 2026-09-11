@@ -5,7 +5,8 @@ import { readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { dirname, join } from 'node:path';
 import { caseToVars, renderTemplate, type TemplateVars } from './render.js';
-import { callLLM, type LLMResult } from '../llm/client.js';
+import { callLLM } from '../llm/client.js';
+import { stripMdFence } from '../utils/md.js';
 import type { Case } from '../case/types.js';
 import type { DocumentType } from '../types.js';
 import type { ModelProvider } from '../llm/client.js';
@@ -67,7 +68,7 @@ export async function generateDocument(opts: GenerateOpts): Promise<GenerateResu
   if (llmResult.ok) {
     return {
       ok: true,
-      content: llmResult.text,
+      content: stripMdFence(llmResult.text),
       usedLLM: true,
       elapsedMs: Date.now() - start,
       mode: 'ai',
@@ -132,5 +133,3 @@ ${userExtra}
     { role: 'user', content: user },
   ];
 }
-
-export { LLMResult };

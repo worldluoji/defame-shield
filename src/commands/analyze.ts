@@ -10,6 +10,7 @@ import { analyzeComplaint } from '../analyzer/complaint-parser.js';
 import { DocumentConverter } from '../converters/document-converter.js';
 import { detectFormat } from '../converters/format-detector.js';
 import { out, die } from '../utils/console.js';
+import { writeJsonFile } from '../utils/json.js';
 import { loadConfig } from '../config/config.js';
 import { caseDir, loadCase, mergeAnalysisIntoCase, updateCase } from '../case/case.js';
 
@@ -38,8 +39,7 @@ export async function analyzeComplaintCommand(input: string, flags: AnalyzeFlags
       out.error(result.error.error);
       if (result.error.installHint) {
         out.info('安装提示:');
-        // eslint-disable-next-line no-console
-        console.log(result.error.installHint);
+        out.log(result.error.installHint);
       }
       process.exit(1);
     }
@@ -65,14 +65,14 @@ export async function analyzeComplaintCommand(input: string, flags: AnalyzeFlags
     if (result.partialDraft) {
       out.warn('已 fallback 到 draft 模式, 保存到 out 指定路径');
       const outPath = resolveOutPath(flags, textInput);
-      writeOutput(outPath, result.partialDraft);
+      writeJsonFile(outPath, result.partialDraft);
     }
     process.exit(1);
   }
 
   // 输出路径
   const outPath = resolveOutPath(flags, textInput);
-  writeOutput(outPath, result.analysis);
+  writeJsonFile(outPath, result.analysis);
 
   out.success(`已生成拆解结果: ${outPath}`);
 
@@ -126,10 +126,4 @@ function resolveOutPath(flags: AnalyzeFlags, input: string): string {
   const dir = dirname(input);
   const base = basename(input).replace(/\.(md|txt)$/, '');
   return join(dir, `${base}.analysis.json`);
-}
-
-function writeOutput(path: string, data: unknown): void {
-  const dir = dirname(path);
-  if (!existsSync(dir)) mkdirSync(dir, { recursive: true });
-  writeFileSync(path, JSON.stringify(data, null, 2) + '\n', 'utf-8');
 }

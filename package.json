@@ -14,7 +14,7 @@
     "test:watch": "vitest",
     "typecheck": "tsc --noEmit",
     "lint": "eslint src/ bin/ scripts/ --ext .ts,.mjs,.js",
-    "build": "tsc -p tsconfig.build.json"
+    "build": "tsc -p tsconfig.build.json && node scripts/copy-templates.mjs"
   },
   "keywords": [
     "defamation",

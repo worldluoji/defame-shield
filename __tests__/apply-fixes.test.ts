@@ -79,6 +79,41 @@ describe('applyFixes', () => {
     expect(result.summary).toContain('跳过 missing-statute-limitations');
   });
 
+  it('missing-jurisdiction: 即便线索明确也拒注入 (适用度上限 0.5 < 0.6, 宁缺毋滥)', () => {
+    const defense = '## 总体答辩策略\n这是策略';
+    const vuln = mkVuln({ id: 'missing-jurisdiction', strategyId: 'jurisdiction', risk: 'critical' });
+    const analysis: ComplaintAnalysis = {
+      ...sampleAnalysis,
+      facts: { ...sampleAnalysis.facts, place: '北京市' },
+      parties: {
+        原告: { name: '张三', role: '原告' },
+        被告: { name: '李四', role: '被告', address: '上海市黄浦区某某路 100 号' },
+      },
+    };
+    const result = applyFixes(defense, [vuln], analysis, {
+      caseName: '测试',
+      defendantName: '李四',
+    });
+    expect(result.injectedCount).toBe(0);
+    expect(result.patched).not.toContain('无管辖权');
+    expect(result.summary).toContain('跳过 missing-jurisdiction');
+  });
+
+  it('missing-wrong-party: 平台线索 (0.6) 确证时仍可注入', () => {
+    const defense = '## 总体答辩策略\n这是策略';
+    const vuln = mkVuln({ id: 'missing-wrong-party', strategyId: 'wrong-party', risk: 'critical' });
+    const analysis: ComplaintAnalysis = {
+      ...sampleAnalysis,
+      facts: { ...sampleAnalysis.facts, tortMethod: '某网站' },
+    };
+    const result = applyFixes(defense, [vuln], analysis, {
+      caseName: '测试',
+      defendantName: '李四',
+    });
+    expect(result.injectedCount).toBe(1);
+    expect(result.patched).toContain('被告主体不适格');
+  });
+
   it('低风险漏洞不注入', () => {
     const defense = '## 重要提示';
     const vuln = mkVuln({ id: 'low-risk-id', risk: 'low' });

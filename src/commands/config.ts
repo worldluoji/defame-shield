@@ -7,8 +7,7 @@ import { out } from '../utils/console.js';
 export function configShowCommand(): void {
   const c = loadConfig();
   out.info('当前配置:');
-  // eslint-disable-next-line no-console
-  console.log(JSON.stringify(c, null, 2));
+  out.log(JSON.stringify(c, null, 2));
 }
 
 export function configSetCommand(key: string, value: string): void {

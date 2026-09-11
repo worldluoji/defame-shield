@@ -3,11 +3,11 @@
  *
  * dsh self-check <defense.md> --analysis <json> [--mode rule|ai|hybrid]
  */
-import { readFileSync, existsSync, writeFileSync, mkdirSync } from 'node:fs';
-import { dirname, basename } from 'node:path';
+import { readFileSync, existsSync } from 'node:fs';
+import { basename } from 'node:path';
 import { selfCheckDefense, type CheckMode, type SelfCheckResult } from '../rebuttal/self-check.js';
 import { out, die } from '../utils/console.js';
-import { readJsonFile } from '../utils/json.js';
+import { readJsonFile, writeJsonFile } from '../utils/json.js';
 import type { ComplaintAnalysis } from '../analyzer/complaint-types.js';
 
 export interface SelfCheckFlags {
@@ -44,9 +44,7 @@ export async function selfCheckCommand(defensePath: string, flags: SelfCheckFlag
 
   // 输出 JSON
   if (flags.out) {
-    const outDir = dirname(flags.out);
-    if (!existsSync(outDir)) mkdirSync(outDir, { recursive: true });
-    writeFileSync(flags.out, JSON.stringify(result, null, 2), 'utf-8');
+    writeJsonFile(flags.out, result);
     out.success(`已写入: ${flags.out}`);
   }
 
@@ -62,21 +60,15 @@ function printSummary(r: SelfCheckResult, severeOnly: boolean): void {
   out.info(summary);
   out.info(`漏洞: 共 ${vulns.length} 个${severeOnly ? ` (仅显示 critical/high: ${displayVulns.length} 个)` : ''}`);
 
-  // eslint-disable-next-line no-console
-  console.log('');
+  out.log('');
   for (const v of displayVulns) {
     const icon = v.risk === 'critical' ? '🔴' : v.risk === 'high' ? '🟠' : v.risk === 'medium' ? '🟡' : '⚪';
-    // eslint-disable-next-line no-console
-    console.log(`${icon} [${v.risk.toUpperCase()}] ${v.attack}`);
-    // eslint-disable-next-line no-console
-    console.log(`   攻击: ${v.plaintiffArgument.slice(0, 100)}${v.plaintiffArgument.length > 100 ? '...' : ''}`);
-    // eslint-disable-next-line no-console
-    console.log(`   修补: ${v.suggestedFix.slice(0, 100)}${v.suggestedFix.length > 100 ? '...' : ''}`);
+    out.log(`${icon} [${v.risk.toUpperCase()}] ${v.attack}`);
+    out.log(`   攻击: ${v.plaintiffArgument.slice(0, 100)}${v.plaintiffArgument.length > 100 ? '...' : ''}`);
+    out.log(`   修补: ${v.suggestedFix.slice(0, 100)}${v.suggestedFix.length > 100 ? '...' : ''}`);
     if (v.legalBasis) {
-      // eslint-disable-next-line no-console
-      console.log(`   法条: ${v.legalBasis}`);
+      out.log(`   法条: ${v.legalBasis}`);
     }
-    // eslint-disable-next-line no-console
-    console.log('');
+    out.log('');
   }
 }

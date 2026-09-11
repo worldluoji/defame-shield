@@ -12,9 +12,11 @@
  */
 
 import { callLLM } from '../llm/client.js';
+import { extractJsonSource } from '../utils/json-extract.js';
 import type { ComplaintAnalysis } from '../analyzer/complaint-types.js';
 import type { RebuttalStrategy, StrategyId } from './strategies-base.js';
 import { STRATEGIES, PROCEDURAL_IDS } from './strategies.js';
+import { detectUsedStrategies, respondsToClaim } from './detect.js';
 
 export type RiskLevel = 'critical' | 'high' | 'medium' | 'low';
 export type CheckMode = 'ai' | 'rule' | 'hybrid';
@@ -141,9 +143,10 @@ export function applyFixes(
         notes.push(`跳过未知策略 ID: ${String(v.strategyId)}`);
         continue;
       }
-      // 时效断言必须有确凿数据 (侵权时间+起诉时间间隔 > 3 年), 否则禁止注入
-      if (v.id === 'missing-statute-limitations' && strategy.applicability(analysis) < 0.6) {
-        notes.push('跳过 missing-statute-limitations: 拆解结果无法确认时效确已届满, 不注入时效断言');
+      // 程序性断言必须有拆解数据确证 (时效须确超 3 年、管辖须跨法域、主体须有平台线索);
+      // 漏洞 id/strategyId 可能来自 AI 输出不可信, 统一复核适用度 (宁缺毋滥)
+      if (strategy.applicability(analysis) < 0.6) {
+        notes.push(`跳过 ${v.id}: 拆解结果不足以确证该程序性反点成立 (适用度 < 0.6), 不注入程序性断言`);
         continue;
       }
       const section = renderProceduralDefense(strategy, caseContext);
@@ -334,7 +337,7 @@ function ruleBasedCheck(defense: string, analysis: ComplaintAnalysis): Vulnerabi
 
   // 5. 诉请匹配检查 — 诉请越多, 越要逐条回应
   for (const claim of analysis.claims) {
-    if (claim.content.length > 30 && !defense.includes(`诉请 ${claim.index}：`)) {
+    if (claim.content.length > 30 && !respondsToClaim(defense, claim.index)) {
       vulns.push({
         id: `claim-${claim.index}-no-response`,
         attack: `诉请 ${claim.index} (${claim.content.slice(0, 20)}...) 在答辩状中未明确回应`,
@@ -453,14 +456,11 @@ function normalizeVulnerability(item: unknown, i: number): Vulnerability {
 }
 
 function extractJsonArray(text: string): unknown[] | null {
-  // 兼容 ```json``` 包裹
-  const m = text.match(/```(?:json)?\s*\n?([\s\S]+?)\n?```/);
-  const jsonText = m && m[1] ? m[1] : text;
-  const first = jsonText.indexOf('[');
-  const last = jsonText.lastIndexOf(']');
-  if (first < 0 || last < 0) return null;
+  const src = extractJsonSource(text, 'array');
+  if (!src) return null;
   try {
-    return JSON.parse(jsonText.slice(first, last + 1));
+    const parsed = JSON.parse(src);
+    return Array.isArray(parsed) ? parsed : null;
   } catch {
     return null;
   }
@@ -481,21 +481,6 @@ function mergeAndDedup(ruleVulns: Vulnerability[], aiVulns: Vulnerability[]): Vu
 
 function normalizeKey(s: string): string {
   return s.replace(/[^\u4e00-\u9fa5a-zA-Z]/g, '').slice(0, 30);
-}
-
-function detectUsedStrategies(defense: string): StrategyId[] {
-  const result: StrategyId[] = [];
-  const all: StrategyId[] = [
-    'fact-true', 'no-act', 'no-tort-grade', 'no-damage', 'no-causation',
-    'statute-limitations', 'jurisdiction', 'wrong-party',
-  ];
-  for (const id of all) {
-    const s = STRATEGIES[id];
-    if (defense.includes(s.name)) {
-      result.push(id);
-    }
-  }
-  return result;
 }
 
 function countLegalBasis(defense: string): number {

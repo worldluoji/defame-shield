@@ -84,8 +84,7 @@ export function caseListCommand(): void {
   }
   out.info(`共 ${list.length} 个案件:`);
   for (const c of list) {
-    // eslint-disable-next-line no-console
-    console.log(`  ${c.id.padEnd(20)} ${c.title}  (${c.cause})`);
+    out.log(`  ${c.id.padEnd(20)} ${c.title}  (${c.cause})`);
   }
 }
 
@@ -95,6 +94,5 @@ export function caseShowCommand(id: string): void {
   if (!c) {
     die(`案件不存在: ${id}`);
   }
-  // eslint-disable-next-line no-console
-  console.log(JSON.stringify(c, null, 2));
+  out.log(JSON.stringify(c, null, 2));
 }

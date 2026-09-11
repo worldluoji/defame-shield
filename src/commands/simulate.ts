@@ -3,14 +3,13 @@
  *
  * dsh simulate <defense.md> --analysis <json> --case <id> [--rounds 3] [--mode rule|ai]
  */
-import { readFileSync, existsSync, writeFileSync, mkdirSync } from 'node:fs';
-import { dirname } from 'node:path';
+import { readFileSync, existsSync } from 'node:fs';
 import { simulateBattle, type SimulationResult } from '../rebuttal/simulator.js';
 import { checkAllStatutes } from '../data/statutes.js';
 import { loadConfig } from '../config/config.js';
 import { loadCase } from '../case/case.js';
 import { out, die } from '../utils/console.js';
-import { readJsonFile } from '../utils/json.js';
+import { readJsonFile, writeJsonFile } from '../utils/json.js';
 import type { ComplaintAnalysis } from '../analyzer/complaint-types.js';
 import type { Case } from '../case/types.js';
 
@@ -78,9 +77,7 @@ export async function simulateCommand(defensePath: string, flags: SimulateFlags)
 
   // 输出 JSON
   if (flags.out) {
-    const outDir = dirname(flags.out);
-    if (!existsSync(outDir)) mkdirSync(outDir, { recursive: true });
-    writeFileSync(flags.out, JSON.stringify(result, null, 2), 'utf-8');
+    writeJsonFile(flags.out, result);
     out.success(`已写入: ${flags.out}`);
   }
 
@@ -94,8 +91,7 @@ export async function simulateCommand(defensePath: string, flags: SimulateFlags)
     const checks = checkAllStatutes(analysis.legalBasisItems);
     for (const c of checks) {
       const icon = c.status === 'found' ? '✅' : c.status === 'expired' ? '⚠️' : '❓';
-      // eslint-disable-next-line no-console
-      console.log(`  ${icon} ${c.id}  - ${c.advice}`);
+      out.log(`  ${icon} ${c.id}  - ${c.advice}`);
     }
   }
 }
@@ -104,28 +100,21 @@ function printBattle(r: SimulationResult): void {
   out.info(`被告胜诉轨迹: ${r.trajectory.map((n) => `${n}%`).join(' → ')}`);
   out.info(`趋势: ${trendLabel(r.trend)}  /  关键转折: ${r.pivotRound !== undefined ? `Round ${r.pivotRound}` : '无'}`);
 
-  // eslint-disable-next-line no-console
-  console.log('');
+  out.log('');
   for (const round of r.rounds) {
     const sideIcon = round.side === '原告' ? '🔴' : '🔵';
-    // eslint-disable-next-line no-console
-    console.log(`--- Round ${round.index} | ${sideIcon} ${round.side} | ${round.type} | 被告胜诉 ${round.defendantWinProb}% ---`);
+    out.log(`--- Round ${round.index} | ${sideIcon} ${round.side} | ${round.type} | 被告胜诉 ${round.defendantWinProb}% ---`);
     for (const kp of round.keyPoints) {
-      // eslint-disable-next-line no-console
-      console.log(`  • ${kp}`);
+      out.log(`  • ${kp}`);
     }
     if (round.evidenceGaps.length > 0) {
-      // eslint-disable-next-line no-console
-      console.log(`  ⚠️ 证据缺口:`);
+      out.log(`  ⚠️ 证据缺口:`);
       for (const eg of round.evidenceGaps) {
-        // eslint-disable-next-line no-console
-        console.log(`    - ${eg}`);
+        out.log(`    - ${eg}`);
       }
     }
-    // eslint-disable-next-line no-console
-    console.log(`  💡 下一步: ${round.nextAction}`);
-    // eslint-disable-next-line no-console
-    console.log('');
+    out.log(`  💡 下一步: ${round.nextAction}`);
+    out.log('');
   }
 
   out.info('=== 整体建议 ===');

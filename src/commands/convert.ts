@@ -26,8 +26,7 @@ export async function convertCommand(input: string, flags: ConvertFlags): Promis
     } else {
       out.error('markitdown 未安装');
       out.info('安装提示:');
-      // eslint-disable-next-line no-console
-      console.log(deps.installHint);
+      out.log(deps.installHint);
       process.exit(1);
     }
     return;
@@ -44,8 +43,7 @@ export async function convertCommand(input: string, flags: ConvertFlags): Promis
     out.error(result.error.error);
     if (result.error.installHint) {
       out.info('安装提示:');
-      // eslint-disable-next-line no-console
-      console.log(result.error.installHint);
+      out.log(result.error.installHint);
     }
     process.exit(1);
   }
@@ -62,9 +60,7 @@ export async function convertCommand(input: string, flags: ConvertFlags): Promis
     out.info(`耗时: ${result.result.metadata.durationMs}ms`);
   }
   if (flags.printMeta) {
-    // eslint-disable-next-line no-console
-    console.log('\n元数据:');
-    // eslint-disable-next-line no-console
-    console.log(JSON.stringify(result.result.metadata, null, 2));
+    out.log('\n元数据:');
+    out.log(JSON.stringify(result.result.metadata, null, 2));
   }
 }

@@ -71,7 +71,7 @@ export async function convertToPdf(mdPath: string, options: PdfOptions): Promise
   if (!useChineseFont) {
     // 提示用户安装 Chrome 或指定 CHINESE_TTF 环境变量
     console.warn(
-      '\n[warn] 未找到可用中文字体 (TFF). PDF 中文将显示为方块.\n' +
+      '\n[warn] 未找到可用中文字体 (TTF). PDF 中文将显示为方块.\n' +
         '       解决方法: 设置 CHINESE_TTF 环境变量指向 .ttf 字体文件, 或安装 Chrome 用 web 渲染.\n',
     );
   }

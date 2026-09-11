@@ -147,6 +147,39 @@ describe('程序性反点 (一票否决性)', () => {
     expect(STRATEGIES['wrong-party'].applicability(a)).toBeGreaterThanOrEqual(0.6);
   });
 
+  it('jurisdiction: place 为平台名 ("微博") → 不给分 (旧实现恒 0.5 误触发)', () => {
+    const a = mkAnalysis({
+      facts: { tortMethod: '微博', tortContent: '内容', spread: '', place: '微博' },
+      parties: {
+        原告: { name: '张三', role: '原告' },
+        被告: { name: '李四', role: '被告', address: '上海市黄浦区某某路 100 号' },
+      },
+    });
+    expect(STRATEGIES['jurisdiction'].applicability(a)).toBeLessThan(0.5);
+  });
+
+  it('jurisdiction: place 为行政区划且与被告住所地不同域 → 0.5', () => {
+    const a = mkAnalysis({
+      facts: { tortMethod: '微博', tortContent: '内容', spread: '', place: '北京市' },
+      parties: {
+        原告: { name: '张三', role: '原告' },
+        被告: { name: '李四', role: '被告', address: '上海市黄浦区某某路 100 号' },
+      },
+    });
+    expect(STRATEGIES['jurisdiction'].applicability(a)).toBe(0.5);
+  });
+
+  it('jurisdiction: 地址不带"市"字但同域 ("北京朝阳区" vs place "北京市") → 不误判', () => {
+    const a = mkAnalysis({
+      facts: { tortMethod: '微博', tortContent: '内容', spread: '', place: '北京市' },
+      parties: {
+        原告: { name: '张三', role: '原告' },
+        被告: { name: '李四', role: '被告', address: '北京朝阳区某某路 1 号' },
+      },
+    });
+    expect(STRATEGIES['jurisdiction'].applicability(a)).toBeLessThan(0.5);
+  });
+
   it('程序性反点优先级高于实体反点', () => {
     // 即使事实 likely_true (高分), 如果诉讼时效 4 年, 仍选 statute-limitations
     const a = mkAnalysis({

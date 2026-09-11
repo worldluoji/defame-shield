@@ -16,8 +16,34 @@
  */
 
 import { callLLM } from '../llm/client.js';
+import { extractJsonSource } from '../utils/json-extract.js';
+import { detectUsedStrategies, respondsToClaim } from './detect.js';
+import type { StrategyId } from './strategies-base.js';
 import type { ComplaintAnalysis } from '../analyzer/complaint-types.js';
 import type { Case } from '../case/types.js';
+
+/** 反点命中后的加分权重 (程序性一票否决 > 实体) */
+const STRATEGY_SCORE: Record<StrategyId, number> = {
+  'statute-limitations': 25,
+  'jurisdiction': 15,
+  'wrong-party': 15,
+  'fact-true': 10,
+  'no-tort-grade': 5,
+  'no-damage': 8,
+  'no-act': 8,
+  'no-causation': 0,
+};
+
+const STRATEGY_KEYPOINT: Record<StrategyId, string> = {
+  'statute-limitations': '采用诉讼时效抗辩 (一票否决性, 高胜算)',
+  'jurisdiction': '采用管辖异议',
+  'wrong-party': '采用主体不适格抗辩',
+  'fact-true': '采用舆论监督免责 (民法典 1025)',
+  'no-tort-grade': '采用未达侵权程度抗辩',
+  'no-damage': '采用无损害后果抗辩',
+  'no-act': '采用未实施被诉行为抗辩',
+  'no-causation': '采用无因果关系抗辩',
+};
 
 export interface Round {
   /** 轮次: 0=起诉, 1=答辩, 2=反驱, 3=再答辩... */
@@ -168,36 +194,10 @@ function scoreDefense(defense: string, analysis: ComplaintAnalysis, _c: Case): {
   const keyPoints: string[] = [];
   const evidenceGaps: string[] = [];
 
-  // 程序性反点存在 +++
-  if (/超过诉讼时效|诉讼时效|3 年|三年/.test(defense)) {
-    score += 25;
-    keyPoints.push('采用诉讼时效抗辩 (一票否决性, 高胜算)');
-  }
-  if (/管辖异议|受案法院.*无管辖权|移送.*法院/.test(defense)) {
-    score += 15;
-    keyPoints.push('采用管辖异议');
-  }
-  if (/被告主体不适格|适格被告|雇主责任/.test(defense)) {
-    score += 15;
-    keyPoints.push('采用主体不适格抗辩');
-  }
-
-  // 实体反点 +5/+10
-  if (/舆论监督|1025|合理核实义务/.test(defense)) {
-    score += 10;
-    keyPoints.push('采用舆论监督免责 (民法典 1025)');
-  }
-  if (/未达名誉权侵害|1024|不构成/.test(defense)) {
-    score += 5;
-    keyPoints.push('采用未达侵权程度抗辩');
-  }
-  if (/无损害后果|未举证|举证不能/.test(defense)) {
-    score += 8;
-    keyPoints.push('采用无损害后果抗辩');
-  }
-  if (/未实施被诉行为|账号.*?并非|不能证明.*?发布/.test(defense)) {
-    score += 8;
-    keyPoints.push('采用未实施被诉行为抗辩');
+  // 反点命中 (与 self-check 共用 detect.ts 口径)
+  for (const id of detectUsedStrategies(defense)) {
+    score += STRATEGY_SCORE[id];
+    keyPoints.push(STRATEGY_KEYPOINT[id]);
   }
 
   // 占位符未填 -10/-20
@@ -231,7 +231,7 @@ function scoreDefense(defense: string, analysis: ComplaintAnalysis, _c: Case): {
 
   // 诉请未回应
   for (const claim of analysis.claims) {
-    if (!defense.includes(`诉请 ${claim.index}：`)) {
+    if (!respondsToClaim(defense, claim.index)) {
       score -= 5;
       evidenceGaps.push(`诉请 ${claim.index} 未回应`);
     }
@@ -370,13 +370,10 @@ ${prev.content}
 }
 
 function extractJson(text: string): unknown {
-  const m = text.match(/```(?:json)?\s*\n?([\s\S]+?)\n?```/);
-  const jsonText = m && m[1] ? m[1] : text;
-  const first = jsonText.indexOf('{');
-  const last = jsonText.lastIndexOf('}');
-  if (first < 0 || last < 0) return null;
+  const src = extractJsonSource(text, 'object');
+  if (!src) return null;
   try {
-    return JSON.parse(jsonText.slice(first, last + 1));
+    return JSON.parse(src);
   } catch {
     return null;
   }

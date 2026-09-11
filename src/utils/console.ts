@@ -4,6 +4,11 @@
 import chalk from 'chalk';
 
 export const out = {
+  /** 无前缀原样输出 (多行报告/JSON 用), eslint-disable 集中在这里 */
+  log: (msg = ''): void => {
+    // eslint-disable-next-line no-console
+    console.log(msg);
+  },
   info: (msg: string): void => {
     // eslint-disable-next-line no-console
     console.log(chalk.blue('ℹ'), msg);

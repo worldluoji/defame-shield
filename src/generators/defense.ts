@@ -9,11 +9,12 @@
  * 输出: Markdown 答辩状
  */
 
-import { callLLM, type LLMResult } from '../llm/client.js';
+import { callLLM } from '../llm/client.js';
 import { selectStrategies, selectStrategyForClaim, type RebuttalStrategy } from '../rebuttal/strategies.js';
 import type { ComplaintAnalysis, ParsedClaim, CaseReference } from '../analyzer/complaint-types.js';
 import type { Case } from '../case/types.js';
 import { parseLooseDate, elapsedYears } from '../utils/dates.js';
+import { stripMdFence } from '../utils/md.js';
 
 export interface DefenseGenerateOpts {
   /** 拆解结果 */
@@ -73,7 +74,7 @@ export async function generateDefense(opts: DefenseGenerateOpts): Promise<Defens
   const llmResult = await callLLM(buildDefensePrompts(baseContent, opts, overallStrategies, caseRefs), {
     provider: opts.provider,
     temperature: 0.3,
-    maxTokens: 6000,
+    maxTokens: 8000,
   });
 
   if (!llmResult.ok) {
@@ -84,9 +85,19 @@ export async function generateDefense(opts: DefenseGenerateOpts): Promise<Defens
     };
   }
 
+  const polished = stripMdFence(llmResult.text);
+  // 输出必附免责声明是领域不变量: "⚠️ 重要提示" 段缺失基本可断定输出被 maxTokens 拦腰截断
+  if (!polished.includes('⚠️ 重要提示')) {
+    return {
+      ok: false,
+      error: 'AI 润色输出缺少 "⚠️ 重要提示" 免责声明段 (疑似输出被截断), 未予采纳, 请使用 draft 初稿',
+      draftFallback: baseContent,
+    };
+  }
+
   return {
     ok: true,
-    content: llmResult.text,
+    content: polished,
     usedLLM: true,
     mode: 'ai',
     strategies: overallStrategies,
@@ -252,7 +263,8 @@ function renderClaimRebuttal(claim: ParsedClaim, strategy: RebuttalStrategy, con
   const elapsed = tort && filing ? elapsedYears(tort, filing).toFixed(1) : '__________';
   const defendantAddress = context.case.defendant.address || '__________';
   const court = context.case.court || '__________';
-  const platform = context.analysis.facts.place || context.analysis.facts.tortMethod || '__________';
+  // {platform} 槽位要的是平台名; place 是行政区划, 只做兜底
+  const platform = context.analysis.facts.tortMethod || context.analysis.facts.place || '__________';
 
   const template = strategy.template
     .replace(/\{tortTime\}/g, tortTime)
@@ -367,5 +379,3 @@ ${opts.extraInstruction ? `**额外要求**: ${opts.extraInstruction}\n` : ''}
     { role: 'user', content: user },
   ];
 }
-
-export { LLMResult };

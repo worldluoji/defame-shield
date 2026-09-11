@@ -10,7 +10,8 @@
  */
 
 import { readFileSync, existsSync } from 'node:fs';
-import { callLLM, type LLMResult } from '../llm/client.js';
+import { callLLM } from '../llm/client.js';
+import { extractJsonSource } from '../utils/json-extract.js';
 import type {
   ComplaintAnalysis,
   AnalyzeOptions,
@@ -155,7 +156,11 @@ export async function analyzeComplaint(
       { role: 'system', content: ANALYZER_SYSTEM_PROMPT },
       {
         role: 'user',
-        content: `## 原告起诉状 (Markdown)\n\n${text}\n\n请输出 JSON。`,
+        content:
+          `## 原告起诉状 (Markdown)\n\n${text}\n\n请输出 JSON。` +
+          (opts.extraInstruction
+            ? `\n\n**律师补充指令** (在不改变上述 JSON 输出格式的前提下遵循): ${opts.extraInstruction}`
+            : ''),
       },
     ],
     {
@@ -196,19 +201,7 @@ function parseAndValidateLLMJson(
   raw: string,
   source: string,
 ): { ok: true; analysis: ComplaintAnalysis } | { ok: false; error: string } {
-  // 尝试从 ```json ... ``` 块中提取
-  let jsonText = raw.trim();
-  const codeBlock = raw.match(/```(?:json)?\s*\n?([\s\S]+?)\n?```/);
-  if (codeBlock && codeBlock[1]) {
-    jsonText = codeBlock[1].trim();
-  } else {
-    // 尝试找第一个 { 到最后一个 }
-    const first = raw.indexOf('{');
-    const last = raw.lastIndexOf('}');
-    if (first >= 0 && last > first) {
-      jsonText = raw.slice(first, last + 1);
-    }
-  }
+  const jsonText = extractJsonSource(raw) ?? raw.trim();
 
   let parsed: unknown;
   try {
@@ -255,25 +248,30 @@ function parseAndValidateLLMJson(
     caseNumber: obj.caseNumber || obj['案号'] ? String(obj.caseNumber ?? obj['案号']) : undefined,
   };
 
+  // AI 漏抽诉请时显式告警, 否则下游答辩状没有"逐条反驳"且自检无从发现缺口
+  if (analysis.claims.length === 0) {
+    analysis.warnings.push('AI 未识别出任何诉讼请求, 请检查起诉状"诉讼请求/请求事项"段落, 或改用 --draft 对照');
+  }
+
   return { ok: true, analysis };
 }
 
 function normalizeParties(p: Record<string, unknown>): ComplaintAnalysis['parties'] {
   const obj: ComplaintAnalysis['parties'] = {
-    原告: normalizeParty((p['原告'] as Record<string, unknown>) ?? p['plaintiff']),
-    被告: normalizeParty((p['被告'] as Record<string, unknown>) ?? p['defendant']),
+    原告: normalizeParty((p['原告'] as Record<string, unknown>) ?? p['plaintiff'], '原告'),
+    被告: normalizeParty((p['被告'] as Record<string, unknown>) ?? p['defendant'], '被告'),
   };
   if (p['律师'] || p['lawyer']) {
-    obj.律师 = normalizeParty((p['律师'] as Record<string, unknown>) ?? (p['lawyer'] as Record<string, unknown>));
+    obj.律师 = normalizeParty((p['律师'] as Record<string, unknown>) ?? (p['lawyer'] as Record<string, unknown>), '律师');
   }
   return obj;
 }
 
-function normalizeParty(p: Record<string, unknown> | undefined): ParsedParty {
-  if (!p) return { name: '', role: '原告' };
+function normalizeParty(p: Record<string, unknown> | undefined, role: ParsedParty['role']): ParsedParty {
+  if (!p) return { name: '', role };
   return {
     name: String(p['name'] ?? p['姓名'] ?? ''),
-    role: (p['role'] as ParsedParty['role']) ?? '原告',
+    role: (p['role'] as ParsedParty['role']) ?? role,
     idNumber: p['idNumber'] || p['身份证号'] ? String(p['idNumber'] ?? p['身份证号']) : undefined,
     address: p['address'] || p['地址'] ? String(p['address'] ?? p['地址']) : undefined,
     contact: p['contact'] || p['联系方式'] ? String(p['contact'] ?? p['联系方式']) : undefined,
@@ -514,10 +512,9 @@ function isNoiseLine(t: string): boolean {
 function extractClaims(text: string): ParsedClaim[] {
   // 段标题: 诉讼请求 / 请求事项 (真实起诉状两种都有), 可带可不带 markdown 井号
   const sectionMatch = text.match(
-    /(?:^|\n)[# \t*]*(?:诉讼请求|请求事项)[# \t]*[:：]?[ \t]*\n([\s\S]*?)(?=\n[# \t*]*(?:事实[与和]理由|法律依据|证据清单|此致)|\n综上|$)/,
+    /(?:^|\n)[# \t*]*(?:诉讼请求|请求事项)[# \t]*[:：]?[ \t]*\n?([\s\S]*?)(?=\n[# \t*]*(?:事实[与和]理由|法律依据|证据清单|此致)|\n综上|$)/,
   );
   if (!sectionMatch || !sectionMatch[1]) return [];
-  const section = sectionMatch[1];
   const items: ParsedClaim[] = [];
 
   const finish = (index: number, parts: string[]): void => {
@@ -533,6 +530,11 @@ function extractClaims(text: string): ParsedClaim[] {
   };
 
   // 逐行扫: "1. xxx" / "(1) xxx" / "1、xxx" 开头为新诉请; 后续非编号行是 PDF 换行的续行
+  // 先把同一行内以 ；/。 分隔的 "2. xxx" 拆到独立行 (纯文本标题版式: "请求事项：1. …；2. …")
+  const section = sectionMatch[1].replace(
+    /([；;。])[ \t]*(?=[（(]?(?:\d{1,2}|[一二三四五六七八九十]+)[）)]?[、.．:：\s])/g,
+    '$1\n',
+  );
   let cur: { index: number; parts: string[] } | null = null;
   for (const raw of section.split('\n')) {
     const t = raw.trim();
@@ -624,11 +626,16 @@ function extractFacts(text: string): ParsedFacts {
   // 抓不到就留空 — 宁可缺数据也不误报年份 (诉讼时效反点依赖此字段)
   const time = findTortTime(section);
 
+  // 侵权地点: 只认介词后紧跟的省/市级行政区划 ("在北京市朝阳区发布" → 北京市) — 管辖反点依赖此字段;
+  // 不收 区/县: "在小区群里发布" 会误抽 "小区"
+  const place = section.match(/(?:在|于)([一-龥]{1,8}?(?:省|市))/)?.[1]?.trim();
+
   return {
     tortMethod,
     tortContent: tortContent.slice(0, 500),
     spread,
     time,
+    place,
   };
 }
 
@@ -742,5 +749,3 @@ function estimateElementScore(text: string): ElementScore {
     damage: hasDamageEvidence ? 'weak' : 'none_proven',
   };
 }
-
-export { LLMResult };

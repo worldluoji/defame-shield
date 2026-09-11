@@ -255,6 +255,20 @@ describe('PDF 转换起诉状 (纯文本标题/逐字换行/噪声行) 回归', 
   });
 });
 
+describe('同行诉请拆分 (纯文本标题版式)', () => {
+  it('诉讼请求标题与条目同行 ("诉讼请求：1. …；2. …") 也能拆分', async () => {
+    const inline = SAMPLE_COMPLAINT.replace(
+      /## 诉讼请求[\s\S]*?诉讼费用。\n/,
+      '## 诉讼请求：1. 依法判令被告立即停止侵害并删除侵权微博；2. 依法判令被告赔偿原告合理费用 30000 元。\n\n',
+    );
+    const res = await analyzeComplaint(inline, { draft: true });
+    if (!res.ok) throw new Error('fail');
+    expect(res.analysis.claims.length).toBe(2);
+    expect(res.analysis.claims[0]?.type).toBe('stop_infringement');
+    expect(res.analysis.claims[1]?.amount).toBe(30000);
+  });
+});
+
 describe('类型契约', () => {
   it('ComplaintAnalysis 形状稳定', async () => {
     const res = await analyzeComplaint(SAMPLE_COMPLAINT, { draft: true });
@@ -296,6 +310,19 @@ describe('扩字段 (C)', () => {
     const res = await analyzeComplaint(SAMPLE_COMPLAINT.replace(/\n*2025 年 9 月 10 日\n*/, '\n'), { draft: true });
     if (!res.ok) throw new Error('fail');
     expect(res.analysis.filingDate).toBeUndefined();
+  });
+
+  it('draft 抽取侵权地点: 介词+省/市 ("在北京市西城区发布" → 北京市)', async () => {
+    const withPlace = SAMPLE_COMPLAINT.replace('连续发布 10 余条', '在北京市西城区连续发布 10 余条');
+    const res = await analyzeComplaint(withPlace, { draft: true });
+    if (!res.ok) throw new Error('fail');
+    expect(res.analysis.facts.place).toBe('北京市');
+  });
+
+  it('draft 无 "在/于+行政区划" 时 place 留空 (管辖反点宁缺毋滥)', async () => {
+    const res = await analyzeComplaint(SAMPLE_COMPLAINT, { draft: true });
+    if (!res.ok) throw new Error('fail');
+    expect(res.analysis.facts.place).toBeUndefined();
   });
 
   it('legalBasisItems 结构化 (含 category/article)', async () => {

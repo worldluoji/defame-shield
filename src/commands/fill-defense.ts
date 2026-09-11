@@ -64,8 +64,7 @@ export async function fillDefenseCommand(defensePath: string, flags: FillFlags):
     const end = Math.min(lines.length, p.line + 2);
     for (let l = start; l < end; l++) {
       const marker = l === p.line - 1 ? '▶' : ' ';
-      // eslint-disable-next-line no-console
-      console.log(`  ${marker} ${lines[l]}`);
+      out.log(`  ${marker} ${lines[l]}`);
     }
 
     // 根据类型给提示

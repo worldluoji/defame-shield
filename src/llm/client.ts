@@ -51,13 +51,22 @@ export interface LLMError {
 
 export type LLMResult = LLMSuccess | LLMError;
 
+export interface LLMOptions {
+  provider?: ModelProvider;
+  temperature?: number;
+  maxTokens?: number;
+  timeoutMs?: number;
+  /** 网络错误/超时/429/5xx 时的额外重试次数 (默认 2) */
+  retries?: number;
+  /** 重试基础间隔 ms, 第 n 次重试等待 n × retryDelayMs (默认 1000) */
+  retryDelayMs?: number;
+}
+
 /**
  * 调 LLM。返回 LLMResult 而不是 throw — 让上层自己决定怎么显示。
+ * 瞬时故障 (网络错误/超时/429/5xx) 自动重试; 配置与协议错误不重试。
  */
-export async function callLLM(
-  messages: LLMMessage[],
-  opts: { provider?: ModelProvider; temperature?: number; maxTokens?: number; timeoutMs?: number } = {},
-): Promise<LLMResult> {
+export async function callLLM(messages: LLMMessage[], opts: LLMOptions = {}): Promise<LLMResult> {
   const provider = opts.provider ?? ((process.env.MODEL_PROVIDER as ModelProvider) || DEFAULT_MODEL);
   if (!(provider in AI_MODELS)) {
     return {
@@ -78,6 +87,8 @@ export async function callLLM(
   }
 
   const timeoutMs = opts.timeoutMs ?? cfg.defaultTimeoutMs;
+  const retries = opts.retries ?? 2;
+  const retryDelayMs = opts.retryDelayMs ?? 1000;
   const body = {
     model: cfg.model,
     messages,
@@ -85,6 +96,30 @@ export async function callLLM(
     ...(opts.maxTokens ? { max_tokens: opts.maxTokens } : {}),
   };
 
+  let last = await attemptLLMCall(cfg, body, apiKey, timeoutMs, provider);
+  for (let attempt = 1; attempt <= retries && last.retryable; attempt++) {
+    await new Promise((r) => setTimeout(r, retryDelayMs * attempt));
+    last = await attemptLLMCall(cfg, body, apiKey, timeoutMs, provider);
+  }
+  if (!last.result.ok && last.retryable && retries > 0) {
+    last.result.error = `${last.result.error} (已重试 ${retries} 次仍失败)`;
+  }
+  return last.result;
+}
+
+interface Attempt {
+  result: LLMResult;
+  /** true = 瞬时故障, 值得重试 */
+  retryable: boolean;
+}
+
+async function attemptLLMCall(
+  cfg: ModelConfig,
+  body: unknown,
+  apiKey: string,
+  timeoutMs: number,
+  provider: ModelProvider,
+): Promise<Attempt> {
   const start = Date.now();
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), timeoutMs);
@@ -101,11 +136,15 @@ export async function callLLM(
 
     if (!res.ok) {
       const text = await res.text();
+      const retryable = res.status === 429 || res.status >= 500;
       return {
-        ok: false,
-        code: 'http_error',
-        provider,
-        error: `HTTP ${res.status}: ${text.slice(0, 500)}`,
+        result: {
+          ok: false,
+          code: 'http_error',
+          provider,
+          error: `HTTP ${res.status}: ${text.slice(0, 500)}`,
+        },
+        retryable,
       };
     }
 
@@ -115,25 +154,37 @@ export async function callLLM(
     const text = data.choices?.[0]?.message?.content;
     if (typeof text !== 'string') {
       return {
-        ok: false,
-        code: 'parse_error',
-        provider,
-        error: 'LLM response missing choices[0].message.content',
+        result: {
+          ok: false,
+          code: 'parse_error',
+          provider,
+          error: 'LLM response missing choices[0].message.content',
+        },
+        retryable: false,
       };
     }
     return {
-      ok: true,
-      text,
-      provider,
-      model: cfg.model,
-      elapsedMs: Date.now() - start,
+      result: {
+        ok: true,
+        text,
+        provider,
+        model: cfg.model,
+        elapsedMs: Date.now() - start,
+      },
+      retryable: false,
     };
   } catch (err) {
     const e = err as Error;
     if (e.name === 'AbortError') {
-      return { ok: false, code: 'timeout', provider, error: `LLM call timed out after ${timeoutMs}ms` };
+      return {
+        result: { ok: false, code: 'timeout', provider, error: `LLM call timed out after ${timeoutMs}ms` },
+        retryable: true,
+      };
     }
-    return { ok: false, code: 'network_error', provider, error: e.message };
+    return {
+      result: { ok: false, code: 'network_error', provider, error: e.message },
+      retryable: true,
+    };
   } finally {
     clearTimeout(timer);
   }
