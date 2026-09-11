@@ -104,10 +104,18 @@ describe('analyzeComplaint (draft 模式)', () => {
     expect(res.analysis.legalBasis.some((s) => s.includes('民法典'))).toBe(true);
   });
 
-  it('置信度为 0.3 (draft 模式默认)', async () => {
+  it('置信度按抽取完整度计算 (draft 封顶 0.7)', async () => {
     const res = await analyzeComplaint(SAMPLE_COMPLAINT, { draft: true });
     if (!res.ok) throw new Error('fail');
-    expect(res.analysis.confidence).toBe(0.3);
+    // SAMPLE 各维度齐全 → 0.7 封顶
+    expect(res.analysis.confidence).toBe(0.7);
+    // 诉请为空的低质量抽取应显著低于封顶
+    const emptyRes = await analyzeComplaint(
+      SAMPLE_COMPLAINT.replace(/1\. 依法判令[\s\S]*?诉讼费用。\n/, '\n'),
+      { draft: true },
+    );
+    if (!emptyRes.ok) throw new Error('fail');
+    expect(emptyRes.analysis.confidence).toBeLessThan(0.7);
   });
 
   it('反驳优先级按诉请顺序', async () => {
@@ -144,6 +152,106 @@ describe('draft 模式证据段抽取', () => {
     expect(notarizedItem?.notarized).toBe(true);
     const sourceItem = res.analysis.evidence.find((e) => e.name.includes('微博截图'));
     expect(sourceItem?.source).toBe('微博平台');
+  });
+});
+
+/** 模拟 markitdown 从 PDF 转换的真实起诉状: 纯文本标题 / 逐字换行 / 页码噪声行 / 公司历史日期 */
+const PDF_STYLE_COMPLAINT = `民事起诉状
+
+原告：小米科技有限责任公司
+
+法定代表人：雷军，董事长
+
+被告：罗骥，男，1991年1月4日出生，住四川省成都市。
+
+案由：网络侵权责任纠纷
+
+请求事项：
+
+1. 请求贵院依法判令被告罗骥立即停止侵害原告小米科技有限责任公司名
+
+誉权的行为，删除其在“哔哩哔哩”平台发布的不实言论；
+
+2. 请求贵院依法判令被告罗骥在“哔哩哔哩”平台发布致歉声明，置顶60日，
+
+以准确澄清事实，消除给原告造成的不良影响；
+
+3. 请求贵院依法判令被告罗骥向原告赔偿损失及合理费用共计500000元；
+
+4. 本案的诉讼费用由被告罗骥承担。
+
+事实和理由：
+
+原告小米科技有限责任公司成立于2010年3月3日，系专注于智能硬件、互联
+
+网电视等业务的全球化移动互联网企业。2021年3月30日，原告在港交所发布公告，
+
+正式宣布进入造车领域，赢得了消费者的一致好评。
+
+1
+
+米
+
+2025年7 月24日，原告发现被告罗骥使用其“哔哩
+哔哩”平台账号以系列动画形式发布原告的相关热点事件，内容包含“小米汽车冲
+
+击绿化带事件”“车载纸巾盒事件”“1999元驾校事件”等不实言论。
+
+综上，根据《中华人民共和国民法典》第一千零二十四条之规定，原告特向贵
+
+院提起诉讼。
+
+此致
+
+北京市海淀区人民法院
+
+具状人：小米科技有限责任公司
+
+2025年11月3 日
+
+限
+
+3
+`;
+
+describe('PDF 转换起诉状 (纯文本标题/逐字换行/噪声行) 回归', () => {
+  it('诉请 4 条: 请求事项标题 + 跨空行续行合并 + 分类/金额', async () => {
+    const res = await analyzeComplaint(PDF_STYLE_COMPLAINT, { draft: true });
+    if (!res.ok) throw new Error('fail');
+    expect(res.analysis.claims.length).toBe(4);
+    expect(res.analysis.claims.map((c) => c.type)).toEqual([
+      'stop_infringement',
+      'restore_reputation',
+      'compensate_loss',
+      'litigation_cost',
+    ]);
+    expect(res.analysis.claims[2]!.amount).toBe(500000);
+    // "名"+换行+"誉权" 拼回完整词
+    expect(res.analysis.claims[0]!.content).toContain('名誉权的行为');
+    expect(res.analysis.warnings).toEqual([]);
+  });
+
+  it('原告名称不截断 (公司法名 10 字)', async () => {
+    const res = await analyzeComplaint(PDF_STYLE_COMPLAINT, { draft: true });
+    if (!res.ok) throw new Error('fail');
+    expect(res.analysis.parties.原告.name).toBe('小米科技有限责任公司');
+    expect(res.analysis.parties.被告.name).toBe('罗骥');
+  });
+
+  it('平台取哔哩哔哩 (不被公司简介"互联网电视"误报)', async () => {
+    const res = await analyzeComplaint(PDF_STYLE_COMPLAINT, { draft: true });
+    if (!res.ok) throw new Error('fail');
+    expect(res.analysis.facts.tortMethod).toBe('哔哩哔哩');
+  });
+
+  it('侵权时间取被告侵权行为句, 不误报公司成立/公告日期', async () => {
+    const res = await analyzeComplaint(PDF_STYLE_COMPLAINT, { draft: true });
+    if (!res.ok) throw new Error('fail');
+    expect(res.analysis.facts.time).toBe('2025年7 月24日');
+    expect(res.analysis.filingDate).toBe('2025-11-03');
+    // "内容包含" 引出的被诉言论列表, 而非公司简介开头
+    expect(res.analysis.facts.tortContent).toContain('冲击绿化带');
+    expect(res.analysis.facts.tortContent).not.toContain('成立于');
   });
 });
 

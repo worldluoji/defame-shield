@@ -408,6 +408,7 @@ function extractByKeywords(text: string, source: string): ComplaintAnalysis {
 
   // 事实抽取
   const facts = extractFacts(text);
+  if (!facts.time) warnings.push('未识别到侵权时间, 诉讼时效反点无法自动评估');
 
   // 证据抽取
   const evidence = extractEvidence(text);
@@ -432,6 +433,16 @@ function extractByKeywords(text: string, source: string): ComplaintAnalysis {
   // 反驳优先级
   const rebuttalPriority = claims.map((c) => c.index);
 
+  // 置信度启发式: 按抽取完整度累加, draft 封顶 0.7 (规则抽取不可能比 AI 更自信)
+  let confidence = 0.2;
+  if (plaintiffName) confidence += 0.1;
+  if (defendantName) confidence += 0.1;
+  if (courtOfFiling) confidence += 0.05;
+  if (filingDate) confidence += 0.05;
+  if (facts.time) confidence += 0.05;
+  confidence += Math.min(0.15, claims.length * 0.05);
+  confidence = Math.min(0.7, Math.round(confidence * 100) / 100);
+
   return {
     source,
     analyzedAt: new Date().toISOString(),
@@ -448,7 +459,7 @@ function extractByKeywords(text: string, source: string): ComplaintAnalysis {
     legalBasisItems,
     elementScore,
     rebuttalPriority,
-    confidence: 0.3,
+    confidence,
     warnings,
     courtOfFiling,
     filingDate,
@@ -480,40 +491,70 @@ function extractName(text: string, role: string): string {
   const section = text.match(sectionRe)?.[0] ?? '';
   if (section) {
     // 跳过 markdown 强调 ** **, 然后匹配 "姓名: 张三" / "姓名/名称：张三" / "名称 张三"
-    const m = section.match(/(?:姓名|名称)[/\\s]*\*?\*?\s*[:：]\s*\*?\*?([^\n*，,\s]{2,8})/)?.[1];
+    // {2,20}: 公司法人名称普遍 10 字以上, 截到 8 字会得到残缺名称
+    const m = section.match(/(?:姓名|名称)[/\\s]*\*?\*?\s*[:：]\s*\*?\*?([^\n*，,\s]{2,20})/)?.[1];
     if (m && m !== '姓名' && m !== '名称') return m.trim();
   }
   // 兜底: "原告张三" "原告：张三" "被告李四"
-  const inlineM = text.match(new RegExp(`${role}[:：]?\\s*([^\\s\\n,，:：*]{2,8})`, 'm'))?.[1];
+  // 与/和/及/的 作停止字符, 防止叙述句 ("原告与被告达成…") 被当名称吃进去
+  const inlineM = text.match(new RegExp(`${role}[:：]?\\s*([^\\s\\n,，、:：*与和及的]{2,20})`, 'm'))?.[1];
   return inlineM && inlineM !== '姓名' && inlineM !== '名称' ? inlineM.trim() : '';
 }
 
+/** 清洗 PDF→markdown 逐字换行: 去空格, 但保留数字/字母之间的断行 (如 "1. 1万余次") */
+function joinCjk(s: string): string {
+  return s.replace(/([一-龥，。、；：（）""''《》%])[ \t\n]+(?=[一-龥，。、；：（）""''《》])/g, '$1');
+}
+
+/** PDF 转换产生的噪声行: 页码/骑缝残字 (应过滤, 不当作诉请续行) */
+function isNoiseLine(t: string): boolean {
+  return /^\d{1,3}$/.test(t) || /^[一-龥]{1,2}$/.test(t) || /^[-—*_·\s]+$/.test(t);
+}
+
 function extractClaims(text: string): ParsedClaim[] {
-  // 抽取 "诉讼请求" 段
-  const sectionMatch = text.match(/诉讼请求[\s\S]*?(?=事实与理由|此致|附[\s\S]*?:|$)/);
-  if (!sectionMatch) return [];
-  const section = sectionMatch[0];
+  // 段标题: 诉讼请求 / 请求事项 (真实起诉状两种都有), 可带可不带 markdown 井号
+  const sectionMatch = text.match(
+    /(?:^|\n)[# \t*]*(?:诉讼请求|请求事项)[# \t]*[:：]?[ \t]*\n([\s\S]*?)(?=\n[# \t*]*(?:事实[与和]理由|法律依据|证据清单|此致)|\n综上|$)/,
+  );
+  if (!sectionMatch || !sectionMatch[1]) return [];
+  const section = sectionMatch[1];
   const items: ParsedClaim[] = [];
-  // 逐行扫: 匹配 "数字. xxx" 或 "（数字）xxx" 开头
-  const re = /^[ \t]*[（(]?(\d+)[）)]?[、.．\s]+(.+?)$/gm;
-  let match: RegExpExecArray | null;
-  while ((match = re.exec(section)) !== null) {
-    const content = match[2]?.replace(/\s+/g, ' ').trim();
-    if (content && content.length > 5) {
+
+  const finish = (index: number, parts: string[]): void => {
+    const content = joinCjk(parts.join(' ')).replace(/\s+/g, ' ').trim();
+    if (content.length > 5) {
       items.push({
-        index: parseInt(match[1]!, 10),
+        index,
         content: content.slice(0, 200),
         type: classifyClaim(content),
         amount: extractAmount(content),
       });
     }
+  };
+
+  // 逐行扫: "1. xxx" / "(1) xxx" / "1、xxx" 开头为新诉请; 后续非编号行是 PDF 换行的续行
+  let cur: { index: number; parts: string[] } | null = null;
+  for (const raw of section.split('\n')) {
+    const t = raw.trim();
+    if (!t) continue;
+    const m = t.match(/^[（(]?(\d+)[）)]?[、.．:：\s]\s*(.+)$/) ?? t.match(/^[一二三四五六七八九十]+[、.．]\s*(.+)$/);
+    if (m) {
+      if (cur) finish(cur.index, cur.parts);
+      cur = /^\d/.test(m[1]!)
+        ? { index: parseInt(m[1]!, 10), parts: [m[2]!] }
+        : { index: items.length + 1, parts: [m[1]!] };
+    } else if (cur && !isNoiseLine(t)) {
+      cur.parts.push(t);
+    }
   }
+  if (cur) finish(cur.index, cur.parts);
   return items;
 }
 
 function classifyClaim(content: string): ParsedClaim['type'] {
-  if (/(停止侵害|删除|屏蔽|断开链接)/.test(content)) return 'stop_infringement';
-  if (/(赔礼道歉|消除影响|恢复名誉|公开致歉)/.test(content)) return 'restore_reputation';
+  if (/(停止侵害|删除|屏蔽|断开链接|下架)/.test(content)) return 'stop_infringement';
+  // "道歉声明置顶 N 日, 消除...不良影响" 是真实起诉状里恢复名誉的主要形态, 措辞常不连续
+  if (/(赔礼道歉|道歉|致歉|恢复名誉)/.test(content) || /消除[^。\n]{0,20}影响/.test(content)) return 'restore_reputation';
   if (/(精神损害|抚慰金)/.test(content)) return 'spiritual_compensation';
   if (/(合理费用|律师费|公证费|差旅费|误工费|赔偿.*?元)/.test(content)) return 'compensate_loss';
   if (/(诉讼费|公告费)/.test(content)) return 'litigation_cost';
@@ -526,34 +567,68 @@ function extractAmount(content: string): number | undefined {
   return parseInt(m[1].replace(/[,，]/g, ''), 10);
 }
 
-function extractFacts(text: string): ParsedFacts {
-  const sectionMatch = text.match(/(?:^|\n)#{1,3}\s*事实与理由\s*\n+([\s\S]*?)(?=\n#{1,3}|此致|附[\s\S]*?:|法律依据|$)/);
-  const section = sectionMatch && sectionMatch[1] ? sectionMatch[1].trim() : text;
+const TORT_PLATFORM_RE = /(新浪微博|微博|抖音|微信|朋友圈|公众号|视频号|哔哩哔哩|B站|b站|快手|小红书|知乎|豆瓣|贴吧|今日头条|头条|短视频|网站|论坛|报纸|杂志|电台|电视台)/;
 
-  const tortMethod =
+/**
+ * 侵权平台识别 — 优先取"发布/上传/直播"等侵权行为动词前 80 字内的平台词,
+ * 避免全文首个命中造成误报 (如被告公司简介里的"互联网电视")
+ */
+function findTortPlatform(section: string): string | undefined {
+  for (const v of section.matchAll(/(?:发布|发表|上传|发帖|撰写|直播|刊登|转载|置顶)/g)) {
+    const win = section.slice(Math.max(0, v.index - 80), v.index);
+    const pm = win.match(TORT_PLATFORM_RE);
+    if (pm && pm[1]) return pm[1];
+  }
+  const all = section.match(TORT_PLATFORM_RE);
+  return all ? all[1] : undefined;
+}
+
+const TORT_ACTION_VERB_RE = /(发布|发表|上传|发帖|撰写|直播|刊登|转载|置顶|侮辱|诽谤)/;
+
+/**
+ * 侵权时间 — 保守策略: 只认句/行首日期, 且"同一句"内须同时出现 被告/被诉/侵权 与侵权行为动词。
+ * 事实段里公司成立日/公告日 ("2021年3月30日, 原告在港交所发布公告") 同样含动词"发布",
+ * 但句中无"被告", 据此排除 — 抓到历史日期会让诉讼时效反点误报。
+ */
+function findTortTime(section: string): string | undefined {
+  for (const m of section.matchAll(/(?:^|[。\n])\s*(\d{4}\s*年(?:\s*\d{1,2}\s*月(?:\s*\d{1,2}\s*日)?)?)/g)) {
+    const sentence = section.slice(m.index + m[0].length).split('。')[0] ?? '';
+    if (/(被告|被诉|侵权)/.test(sentence) && TORT_ACTION_VERB_RE.test(sentence)) {
+      return m[1]!.replace(/\s+/g, ' ').trim();
+    }
+  }
+  const on = section.match(/于\s*(\d{4}\s*年(?:\s*\d{1,2}\s*月(?:\s*\d{1,2}\s*日)?)?)\s*(?:发布|发表|撰写|发帖|上传|转发)/);
+  return on?.[1]?.replace(/\s+/g, ' ').trim();
+}
+
+function extractFacts(text: string): ParsedFacts {
+  // 段标题: "事实与理由" / "事实和理由", markdown 井号与冒号可有可无 (PDF 转换多为纯文本)
+  const sectionMatch = text.match(
+    /(?:^|\n)[# \t*]*事实[与和]理由[# \t]*[:：]?[ \t]*\n?([\s\S]*?)(?=\n[# \t*]*(?:法律依据|证据清单|此致)|\n综上|$)/,
+  );
+  // joinCjk: PDF 逐字换行会把 "哔哩哔哩" 拆成 "哔哩\n哔哩", 先拼回再抽取平台/时间/内容
+  const section = joinCjk(sectionMatch && sectionMatch[1] ? sectionMatch[1].trim() : text);
+
+  const tortMethod = findTortPlatform(section) ??
     section.match(/(?:通过|利用)([^，,。;；\n]{2,30}?)(?:发布|传播|发帖|撰文)/)?.[1]?.trim() ??
-    section.match(/(微博|抖音|微信|朋友圈|公众号|网站|论坛|报纸|杂志|电视|电台|短视频)/)?.[1] ??
     '（未识别）';
 
   const tortContent =
-    section.match(/(?:内容为|所述为|表述为|写道|声称)[:：]?[""「」]?([\s\S]{20,500}?)[""」]?(?:[。！？\n]|$)/)?.[1]?.trim() ??
+    section.match(/(?:内容为|内容包含|所述为|表述为|写道|声称)[:：]?[""「」]?([\s\S]{20,500}?)[""」]?(?:[。！？\n]|$)/)?.[1]?.trim() ??
     section.slice(0, 300);
 
   const spread =
-    section.match(/(粉丝\s*[\d,，]+|浏览\s*[\d,，]+|阅读\s*[\d,，]+|转发\s*[\d,，]+|播放\s*[\d,，]+)/)?.[0] ??
+    section.match(/(粉丝\s*[\d,，]+|浏览\s*[\d,，]+|阅读\s*[\d,，]+|转发\s*[\d,，]+|播放\s*[\d,，]+|播放量[^\d\n]{0,8}\d[\d,，]*)/)?.[0] ??
     '';
 
-  // 侵权时间: 只认 "事实与理由" 段句首日期或 "于X年X月X日发布…" 侵权动词语境,
   // 抓不到就留空 — 宁可缺数据也不误报年份 (诉讼时效反点依赖此字段)
-  const timeMatch =
-    section.match(/(?:^|[。\n])\s*(\d{4}\s*年(?:\s*\d{1,2}\s*月(?:\s*\d{1,2}\s*日)?)?)/) ??
-    section.match(/于\s*(\d{4}\s*年(?:\s*\d{1,2}\s*月(?:\s*\d{1,2}\s*日)?)?)\s*(?:发布|发表|撰写|发帖|上传|转发)/);
+  const time = findTortTime(section);
 
   return {
     tortMethod,
     tortContent: tortContent.slice(0, 500),
     spread,
-    time: timeMatch && timeMatch[1] ? timeMatch[1].replace(/\s+/g, ' ').trim() : undefined,
+    time,
   };
 }
 
