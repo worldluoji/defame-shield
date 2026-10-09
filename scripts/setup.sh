@@ -18,18 +18,18 @@ if ! command -v node >/dev/null 2>&1; then
 fi
 echo "✓ Node: $(node --version)"
 
+# 仓库仅有 pnpm-lock.yaml; npm 安装无锁保证, 依赖树可能漂移, 故不接受
 if ! command -v pnpm >/dev/null 2>&1; then
-  echo "⚠️  pnpm 未安装, 尝试用 npm..."
-  NPM_CMD="npm install"
-else
-  echo "✓ pnpm: $(pnpm --version)"
-  NPM_CMD="pnpm install"
+  echo "❌ pnpm 未安装 (本仓库只支持 pnpm, 依赖 pnpm-lock.yaml 锁版本)"
+  echo "   安装: corepack enable  或  npm i -g pnpm"
+  exit 1
 fi
+echo "✓ pnpm: $(pnpm --version)"
 
 # 2. 安装 Node 依赖
 echo ""
 echo "▶ 安装 Node 依赖..."
-$NPM_CMD
+pnpm install
 
 # 3-6. Python 组件 (可选增强): uv venv + markitdown
 # pdf/docx 转换走纯 Node 兜底 (mammoth + pdf.js) 即可; markitdown 仅 pptx/xlsx/html/表格增强需要
