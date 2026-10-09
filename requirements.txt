@@ -3,11 +3,11 @@
 # MarkItDown 是微软开源的 PDF/Word/PPT/Excel → Markdown 转换工具
 # https://github.com/microsoft/markitdown
 #
-# 必需: pip install 'markitdown[pdf,docx]'  (推荐)
-# 全功能 (含 OCR/音频/YouTube): pip install 'markitdown[all]'
-# macOS brew: brew install markitdown (需要 tap)
+# 安装: ./scripts/setup.sh (uv pip install -r requirements.txt)
+# 手动: pip install -r requirements.txt
 #
 # Python 3.10+ 必需
 
-# 核心 (PDF + Word)
-markitdown[pdf,docx]>=0.1.0a1
+# 核心 (PDF + Word) — 钉死版本: 下游 complaint-parser 的正则依赖
+# markitdown 输出的 markdown 结构, 升级前需重跑 convert + analyze 验证
+markitdown[pdf,docx]==0.1.8b1

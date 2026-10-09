@@ -95,12 +95,13 @@ applyCmd
   .option('--vulnerabilities <json>', '使用已有漏洞列表, 跳过 self-check')
   .action(applyFixesCommand);
 
-const convertCmd = program.command('convert <file>').description('文档转换: PDF/Word/PPT/Excel → markdown (需安装 Microsoft MarkItDown)');
+const convertCmd = program.command('convert [file]').description('文档转换: PDF/Word/PPT/Excel → markdown (pdf/docx 无 markitdown 时自动走纯 Node 兜底)');
 convertCmd
   .option('--out <path>', '输出 markdown 路径 (默认: <原名>.md)')
   .option('--no-cache', '跳过缓存, 强制重新转换')
+  .option('--native', '强制纯 Node 转换 (mammoth/pdf.js, 不调 markitdown; 仅 pdf/docx)', false)
   .option('--print-meta', '打印完整元数据', false)
-  .option('--check', '仅检查 markitdown 是否已安装', false)
+  .option('--check', '检查转换能力 (纯 Node 兜底 + markitdown)', false)
   .action(convertCommand);
 
 const simCmd = program.command('simulate <defense>').description('攻防推演 — 模拟原/被告多轮交锋, 评估胜诉概率轨迹');

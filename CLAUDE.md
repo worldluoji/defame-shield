@@ -6,12 +6,12 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 defame-shield (`dsh`):中文民事名誉权诉讼文书生成 CLI。**核心场景是被告应诉** — 拆解原告起诉状,用 5 个实体反点 + 3 个程序性反点逐条反驳,生成答辩状。纯本地文件存储(`data/cases/`),无数据库。
 
-技术栈:TypeScript ESM (Node ≥ 18.17, pnpm) + Python 侧组件 Microsoft MarkItDown(uv venv,用于 PDF/Word → Markdown 转换)。
+技术栈:TypeScript ESM (Node ≥ 18.17, pnpm)。PDF/Word → Markdown 走纯 Node 兜底(mammoth + pdf-parse,文字版无需 Python);可选增强 Microsoft MarkItDown(uv venv,PPT/Excel/HTML 与表格结构需要)。
 
 ## 常用命令
 
 ```bash
-./scripts/setup.sh                        # 一键安装: pnpm deps + uv venv + markitdown
+./scripts/setup.sh                        # 一键安装: pnpm deps +(有 uv 时)uv venv + 可选 markitdown
 pnpm dev -- <args>                        # 开发模式跑 CLI (tsx 直接执行 src/cli.ts, 无需 build)
 pnpm test                                 # vitest (~170 个用例, <1s, 不发任何网络请求)
 pnpm test __tests__/simulator.test.ts     # 单测文件
@@ -19,7 +19,7 @@ pnpm test -t "用例名关键字"                # 单个用例
 pnpm typecheck                            # tsc --noEmit
 pnpm lint                                 # eslint src/ bin/
 pnpm build                                # tsc → dist/ (tsconfig.build.json)
-pnpm dev -- convert --check               # 验证 markitdown 是否可用
+pnpm dev -- convert --check               # 查看转换能力(纯 Node 兜底 + markitdown 增强)
 ```
 
 smoke 测试可用现成样本:`data/cases/def-sample-001/`(被告视角,含 complaint-analysis.json)。
@@ -29,7 +29,7 @@ smoke 测试可用现成样本:`data/cases/def-sample-001/`(被告视角,含 com
 每个环节是 `dsh` 子命令,产物在 `data/cases/<id>/` 下流转:
 
 ```
-complaint.pdf/docx ─(convert: markitdown)→ complaint.md
+complaint.pdf/docx ─(convert: 纯 Node 兜底 / markitdown 增强)→ complaint.md
   ─(analyze-complaint)→ complaint-analysis.json
   ─(generate defense --from-analysis)→ outputs/defense-*.md
   ─(self-check → apply-fixes)→ defense-patched.md   # apply-fixes 目标已存在需 --yes 才覆盖

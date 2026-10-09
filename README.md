@@ -62,11 +62,11 @@ pnpm dev -- <args>                       # 开发模式 (tsx, 无需 build)
 pnpm build && node bin/dsh.mjs <args>    # build 后直接跑
 ```
 
-需要 PDF/Word 转换 (`convert` / `analyze-complaint *.pdf`) 的话,再装一次 Python 侧组件:
+PDF/Word 转换开箱即用 (`convert` / `analyze-complaint *.pdf` 走纯 Node 兜底: mammoth + pdf.js, 文字版无需 Python)。需要 PPT/Excel/HTML 或更好的表格/结构保留时,再装可选的 Python 增强:
 
 ```bash
-./scripts/setup.sh         # 一键: pnpm deps + uv venv + Microsoft MarkItDown
-dsh convert --check        # 验证 markitdown 可用
+./scripts/setup.sh         # 一键: pnpm deps + (有 uv 时) uv venv + Microsoft MarkItDown
+dsh convert --check        # 查看转换能力 (纯 Node 兜底 / markitdown 增强)
 ```
 
 ### 2. 初始化项目
@@ -186,7 +186,7 @@ dsh init                                            初始化项目 (dsh.config.
 dsh config show / set <key> <value>                 查看/修改配置 (author/llmEnabled/casesDir/outputsDir)
 dsh case new <id>                                   建案 (只填被告侧; 原告侧见场景 B 注意事项)
 dsh case list / show <id>                           案件列表/详情
-dsh convert <file> [--out|--print-meta|--check]     PDF/Word/PPT/Excel → markdown (需 MarkItDown)
+dsh convert <file> [--out|--native|--print-meta|--check]  PDF/Word → markdown (纯 Node); PPT/Excel/HTML 需 MarkItDown
 dsh analyze-complaint <起诉状> [选项]               拆解 → complaint-analysis.json
   --case <id>          输出到案件目录并自动回填 case.json (推荐)
   --draft              纯关键词/正则抽取, 不调 LLM
@@ -234,7 +234,7 @@ defame-shield/
 │   ├── analyzer/         起诉状拆解器 (AI + draft 双实现)
 │   ├── rebuttal/         8 反点策略库 (5 实体 + 3 程序) + 命中检测/自检/攻防推演
 │   ├── generators/       文书生成器 (含反点驱动答辩 v2) + 模板渲染
-│   ├── converters/       文档转换 (MarkItDown 适配)
+│   ├── converters/       文档转换 (纯 Node 兜底 mammoth/pdf.js + MarkItDown 增强适配)
 │   ├── data/             法条登记 (23 条 + 司法解释, 离线时效检查)
 │   ├── case/             案件数据结构 + CRUD
 │   ├── config/           dsh.config.json + .env 解析
@@ -243,7 +243,7 @@ defame-shield/
 │   └── utils/            工具函数 (PDF 导出/占位符/JSON 等)
 ├── data/cases/<case-id>/ case.json + complaint.md + complaint-analysis.json + outputs/
 ├── docs/                 法律免责声明 + 答辩工作流 + todo
-├── scripts/              setup.sh (一键装依赖 + uv venv + markitdown)
+├── scripts/              setup.sh (一键装依赖; uv 可用时加装可选的 markitdown 增强)
 ├── __tests__/            160 个单元测试
 └── package.json
 ```

@@ -6,8 +6,7 @@
  * - 输出: markdown 字符串
  *
  * 重要: markitdown 是 Python 工具, 需要单独安装
- *   pip install 'markitdown[pdf,docx]'
- *   或 pip install 'markitdown[all]'  (含 OCR/音频等)
+ *   ./scripts/setup.sh  (推荐, 建 .venv 并按 requirements.txt 钉版本)
  *
  * 验证 markitdown 是否可用: spawn 'markitdown' --version
  */
@@ -15,7 +14,8 @@
 import { spawn, spawnSync } from 'node:child_process';
 import { existsSync, mkdtempSync, readFileSync, rmSync } from 'node:fs';
 import { homedir, tmpdir } from 'node:os';
-import { join, resolve } from 'node:path';
+import { dirname, join, resolve } from 'node:path';
+import { fileURLToPath } from 'node:url';
 
 export interface MarkItDownOptions {
   /** 超时 ms, 默认 60s */
@@ -41,13 +41,7 @@ export interface MarkItDownError {
 
 export type MarkItDownResult = MarkItDownSuccess | MarkItDownError;
 
-/** 检查 markitdown 是否已安装 — 多级查找
- *  1. `which markitdown` (PATH)
- *  2. `<cwd>/.venv/bin/markitdown` (项目本地 uv venv)
- *  3. `<cwd>/venv/bin/markitdown` (项目本地 venv)
- *  4. `~/.venvs/defame-shield/bin/markitdown` (集中 venv)
- *  5. `~/Library/Caches/markitdown` (macOS 缓存, 备用)
- */
+/** 检查 markitdown 是否已安装 — 多级查找 (见 findMarkItDownBinaries 顺序) */
 export function isMarkItDownInstalled(): boolean {
   for (const p of findMarkItDownBinaries()) {
     try {
@@ -59,11 +53,24 @@ export function isMarkItDownInstalled(): boolean {
   return false;
 }
 
-/** 返回所有可能的 markitdown 路径 (按优先级) */
+/** 包根目录: src/converters 与 dist/src/converters 上跳 3 级都落到仓库根 */
+function findPackageRoot(): string {
+  return resolve(dirname(fileURLToPath(import.meta.url)), '../../..');
+}
+
+/** 返回所有可能的 markitdown 路径 (按优先级):
+ *  1. `<包根>/.venv/bin/markitdown` (setup.sh 创建的项目 venv, 相对自身解析 — 全局 link / 异地 cwd 也能找到)
+ *  2. `which markitdown` (PATH 全局)
+ *  3. `<cwd>/.venv/bin/markitdown` (兼容: 在别的 defame-shield 检出目录里跑)
+ *  4. `<cwd>/venv/bin/markitdown`
+ *  5. `~/.venvs/defame-shield/bin/markitdown` (集中 venv)
+ */
 function findMarkItDownBinaries(): string[] {
   const candidates: string[] = [];
   const cwd = process.cwd();
-  // 1) which PATH 查找
+  // 1) 包根 .venv 优先 — setup.sh 的权威位置, 压过 PATH 里可能损坏的全局安装
+  candidates.push(join(findPackageRoot(), '.venv', 'bin', 'markitdown'));
+  // 2) which PATH 查找
   try {
     const which = spawnSync('which', ['markitdown'], { stdio: 'pipe' });
     if (which.status === 0 && which.stdout) {
@@ -72,11 +79,11 @@ function findMarkItDownBinaries(): string[] {
   } catch {
     // ignore
   }
-  // 2) 项目本地 .venv (uv 标准)
+  // 3) 当前目录 .venv (uv 标准)
   candidates.push(join(cwd, '.venv', 'bin', 'markitdown'));
-  // 3) 项目本地 venv
+  // 4) 当前目录 venv
   candidates.push(join(cwd, 'venv', 'bin', 'markitdown'));
-  // 4) 集中 venv
+  // 5) 集中 venv
   candidates.push(join(homedir(), '.venvs', 'defame-shield', 'bin', 'markitdown'));
   return candidates;
 }
@@ -89,14 +96,12 @@ function findMarkItDownPath(): string | null {
   return null;
 }
 
-/** 安装提示 */
+/** 安装提示 — markitdown 现为可选增强 (pdf/docx 有纯 Node 兜底) */
 export const MARKITDOWN_INSTALL_HINT =
-  'Microsoft MarkItDown 未安装. 请运行:\n' +
-  '  pip install "markitdown[pdf,docx]"\n' +
-  '或全功能版 (含 OCR):\n' +
-  '  pip install "markitdown[all]"\n' +
-  '或用 brew (macOS):\n' +
-  '  brew install markitdown\n' +
+  'Microsoft MarkItDown 未安装 (pdf/docx 已自动走纯 Node 兜底; pptx/xlsx/html/表格需要它). 安装:\n' +
+  '  ./scripts/setup.sh\n' +
+  '或手动:\n' +
+  '  pip install -r requirements.txt   # 与项目同版本\n' +
   '安装后验证: markitdown --help';
 
 /** 调用 markitdown CLI 转换文件 → markdown */

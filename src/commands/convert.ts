@@ -2,6 +2,7 @@
  * dsh convert — 文件格式转换 (.pdf/.docx → markdown)
  *
  * dsh convert <input> [-o output.md] [--no-cache] [--print-meta]
+ * dsh convert --check  (仅检查 markitdown, 不需要文件)
  */
 import { existsSync, writeFileSync, mkdirSync } from 'node:fs';
 import { dirname, basename } from 'node:path';
@@ -14,24 +15,27 @@ export interface ConvertFlags {
   cache?: boolean;
   printMeta?: boolean;
   check?: boolean;
+  /** 强制纯 Node 路径 (pdf/docx) */
+  native?: boolean;
 }
 
-export async function convertCommand(input: string, flags: ConvertFlags): Promise<void> {
-  const converter = new DocumentConverter();
+export async function convertCommand(input: string | undefined, flags: ConvertFlags): Promise<void> {
+  const converter = new DocumentConverter({ preferNative: flags.native });
 
   if (flags.check) {
     const deps = converter.checkDependencies();
+    out.info('纯 Node 兜底 (mammoth + pdf.js): 可用 — 文字版 pdf / docx');
     if (deps.markitdownInstalled) {
-      out.success('markitdown 已安装');
+      out.success('markitdown 已安装 — pptx/xlsx/html/表格增强可用');
     } else {
-      out.error('markitdown 未安装');
-      out.info('安装提示:');
-      out.log(deps.installHint);
-      process.exit(1);
+      out.warn('markitdown 未安装 — pptx/xlsx/html 不可用; pdf/docx 自动走纯 Node 兜底');
+      out.info('安装提示 (可选, ./scripts/setup.sh):');
+      out.log(deps.installHint ?? '');
     }
     return;
   }
 
+  if (!input) die('用法: dsh convert <file> 或 dsh convert --check');
   if (!existsSync(input)) die(`文件不存在: ${input}`);
 
   const useCache = flags.cache !== false;
@@ -55,7 +59,11 @@ export async function convertCommand(input: string, flags: ConvertFlags): Promis
   writeFileSync(outPath, result.result.markdown, 'utf-8');
 
   out.success(`已写入: ${outPath}`);
-  out.info(`格式: ${result.result.metadata.format}  /  转换器: ${result.result.metadata.converter}  /  缓存: ${result.result.metadata.fromCache ? '命中' : 'miss'}`);
+  const conv = result.result.metadata.converter;
+  out.info(`格式: ${result.result.metadata.format}  /  转换器: ${conv}  /  缓存: ${result.result.metadata.fromCache ? '命中' : 'miss'}`);
+  if ((conv === 'native-pdf' || conv === 'native-docx') && !flags.native) {
+    out.info('当前为纯 Node 兜底结果; 如需更好结构 (表格/pptx/xlsx), 安装 markitdown: ./scripts/setup.sh');
+  }
   if (result.result.metadata.durationMs) {
     out.info(`耗时: ${result.result.metadata.durationMs}ms`);
   }
