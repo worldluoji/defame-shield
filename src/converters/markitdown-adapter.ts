@@ -41,16 +41,9 @@ export interface MarkItDownError {
 
 export type MarkItDownResult = MarkItDownSuccess | MarkItDownError;
 
-/** 检查 markitdown 是否已安装 — 多级查找 (见 findMarkItDownBinaries 顺序) */
+/** 检查 markitdown 是否已安装且可运行 (见 resolveMarkItDownBin) */
 export function isMarkItDownInstalled(): boolean {
-  for (const p of findMarkItDownBinaries()) {
-    try {
-      if (existsSync(p)) return true;
-    } catch {
-      // ignore
-    }
-  }
-  return false;
+  return resolveMarkItDownBin() !== null;
 }
 
 /** 包根目录: src/converters 与 dist/src/converters 上跳 3 级都落到仓库根 */
@@ -88,10 +81,16 @@ function findMarkItDownBinaries(): string[] {
   return candidates;
 }
 
-/** 找第一个存在的 markitdown 路径, 用于 spawn */
-function findMarkItDownPath(): string | null {
+/** 返回第一个"存在且能跑 --version"的 markitdown 路径 — 损坏 venv 里的断链/坏解释器不会误报已安装 */
+function resolveMarkItDownBin(): string | null {
   for (const p of findMarkItDownBinaries()) {
-    if (existsSync(p)) return p;
+    if (!existsSync(p)) continue;
+    try {
+      const v = spawnSync(p, ['--version'], { stdio: 'pipe', timeout: 10_000 });
+      if (v.status === 0) return p;
+    } catch {
+      // 候选不可执行, 试下一个
+    }
   }
   return null;
 }
@@ -113,8 +112,8 @@ export async function convertWithMarkItDown(
     return { ok: false, error: `文件不存在: ${filePath}`, code: 'spawn_error' };
   }
 
-  // 优先用 findMarkItDownPath() 找本地 .venv 的二进制
-  const markitdownBin = findMarkItDownPath();
+  // 解析本地 .venv / PATH 中第一个可运行的二进制
+  const markitdownBin = resolveMarkItDownBin();
   if (!markitdownBin) {
     return {
       ok: false,
