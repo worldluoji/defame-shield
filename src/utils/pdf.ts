@@ -7,7 +7,7 @@
 import { marked, Tokens } from 'marked';
 import PDFDocument from 'pdfkit';
 import { createWriteStream, existsSync, mkdirSync } from 'node:fs';
-import { dirname } from 'node:path';
+import { dirname, join } from 'node:path';
 
 /** PDF 渲染字体对 (中文字体缺失时回退 PDF 内置字体) */
 interface FontPair {
@@ -21,6 +21,41 @@ export interface PdfOptions {
   caseNumber?: string;
   /** 是否显示页码 (默认 true) */
   showPageNumber?: boolean;
+}
+
+/** 跨平台候选中文 TTF (纯 TTF; TTC 因 fontkit 2.x 兼容问题不列). Windows 走 SystemRoot/Fonts 动态拼接 */
+export function findCjkTtf(): string | null {
+  const envFont = process.env['CHINESE_TTF'];
+  if (envFont && existsSync(envFont)) return envFont;
+  const winFontDir =
+    process.platform === 'win32'
+      ? join(process.env['SystemRoot'] ?? 'C:\\Windows', 'Fonts')
+      : null;
+  const candidates = [
+    // macOS
+    '/Library/Fonts/Arial Unicode.ttf',
+    // Windows (宋体/雅黑是 TTC, 候选这三个 TTF)
+    ...(winFontDir ? [join(winFontDir, 'simhei.ttf'), join(winFontDir, 'simfang.ttf'), join(winFontDir, 'simkai.ttf')] : []),
+    // Linux (发行版常见的 CJK TTF fallback)
+    '/usr/share/fonts/truetype/droid/DroidSansFallbackFull.ttf',
+    '/usr/share/fonts/truetype/droid/DroidSansFallback.ttf',
+    '/usr/share/fonts/google-droid/DroidSansFallback.ttf',
+  ];
+  return candidates.find((p) => existsSync(p)) ?? null;
+}
+
+/** 注册中文 TTF; 失败回退 PDF 内置字体 (中文显示为方块) */
+function registerCjkFont(doc: PDFKit.PDFDocument): { fonts: FontPair; fontSource: string | null } {
+  const fallback = { fonts: { regular: 'Times-Roman', bold: 'Times-Bold' } as FontPair, fontSource: null };
+  const ttf = findCjkTtf();
+  if (!ttf) return fallback;
+  try {
+    doc.registerFont('CN', ttf);
+    doc.registerFont('CN-Bold', ttf);
+    return { fonts: { regular: 'CN', bold: 'CN-Bold' }, fontSource: ttf };
+  } catch {
+    return fallback;
+  }
 }
 
 /** 解析 + 生成 */
@@ -53,26 +88,12 @@ export async function convertToPdf(mdPath: string, options: PdfOptions): Promise
   doc.pipe(stream);
 
   // 注册中文字体 (TTF 用 fontkit; TTC 因 fontkit 2.x 兼容问题暂不可用)
-  let useChineseFont = false;
-  try {
-    // 优先尝试 macOS 内置的 TTF (Arial Unicode 支持 CJK 字符)
-    const ttfPath = process.env['CHINESE_TTF'] || '/Library/Fonts/Arial Unicode.ttf';
-    if (existsSync(ttfPath)) {
-      doc.registerFont('CN', ttfPath);
-      doc.registerFont('CN-Bold', ttfPath);
-      useChineseFont = true;
-    }
-  } catch {
-    // 字体注册失败, fallback 到默认 (PDF 14 base fonts, 中文字符会显示为方块)
-  }
-  const fonts: FontPair = useChineseFont
-    ? { regular: 'CN', bold: 'CN-Bold' }
-    : { regular: 'Times-Roman', bold: 'Times-Bold' };
-  if (!useChineseFont) {
-    // 提示用户安装 Chrome 或指定 CHINESE_TTF 环境变量
+  const { fonts, fontSource } = registerCjkFont(doc);
+  if (!fontSource) {
     console.warn(
       '\n[warn] 未找到可用中文字体 (TTF). PDF 中文将显示为方块.\n' +
-        '       解决方法: 设置 CHINESE_TTF 环境变量指向 .ttf 字体文件, 或安装 Chrome 用 web 渲染.\n',
+        '       解决方法: 设 CHINESE_TTF 环境变量指向系统任一中文 .ttf 字体文件' +
+        ' (macOS: Arial Unicode / Windows: simhei|simfang|simkai / Linux: DroidSansFallback).\n',
     );
   }
 
@@ -147,27 +168,7 @@ function renderToken(doc: PDFKit.PDFDocument, token: Tokens.Generic, fonts: Font
     }
 
     case 'table': {
-      const table = token as Tokens.Table;
-      // 简化为文本输出
-      const colWidth = (doc.page.width - 144) / Math.max(table.header.length, 1);
-      table.header.forEach((cell, i) => {
-        doc.font(fonts.bold).fontSize(11).text(cell.text, {
-          width: colWidth,
-          continued: i < table.header.length - 1,
-        });
-      });
-      doc.font(fonts.regular).fontSize(11);
-      for (const row of table.rows) {
-        row.forEach((cell, i) => {
-          doc.text(cell.text, {
-            width: colWidth,
-            continued: i < row.length - 1,
-          });
-        });
-        doc.moveDown(0.2);
-      }
-      doc.moveDown(0.3);
-      doc.font(fonts.regular).fontSize(12);
+      renderTable(doc, token as Tokens.Table, fonts);
       break;
     }
 
@@ -191,9 +192,50 @@ function renderToken(doc: PDFKit.PDFDocument, token: Tokens.Generic, fonts: Font
       break;
 
     default:
-      // 跳过不支持的 token (html, def, table, etc.)
+      // 跳过不支持的 token (html, def, etc.)
       break;
   }
+}
+
+/** 表格网格渲染: 等宽列 + 行底边线; 行整体放不下时整行换页 */
+function renderTable(doc: PDFKit.PDFDocument, table: Tokens.Table, fonts: FontPair): void {
+  const left = doc.page.margins.left;
+  const usable = doc.page.width - left - doc.page.margins.right;
+  const cols = Math.max(table.header.length, 1);
+  const colWidth = usable / cols;
+  const pad = 4;
+
+  const rows: Array<{ cells: string[]; bold: boolean }> = [
+    { cells: table.header.map((c) => c.text), bold: true },
+    ...table.rows.map((r) => ({ cells: r.map((c) => c.text), bold: false })),
+  ];
+
+  doc.fontSize(11);
+  doc.lineWidth(0.5).strokeColor('#999');
+  let y = doc.y;
+  doc.moveTo(left, y).lineTo(left + usable, y).stroke(); // 表头顶线
+
+  for (const row of rows) {
+    doc.font(row.bold ? fonts.bold : fonts.regular);
+    const heights = row.cells.map((t) => doc.heightOfString(t, { width: colWidth - pad * 2 }));
+    const rowHeight = Math.max(11, ...heights) + pad * 2;
+    if (y + rowHeight > doc.page.height - doc.page.margins.bottom) {
+      doc.addPage();
+      y = doc.page.margins.top;
+      doc.moveTo(left, y).lineTo(left + usable, y).stroke(); // 新页补一条顶线
+    }
+    row.cells.forEach((t, i) => {
+      doc.text(t, left + i * colWidth + pad, y + pad, { width: colWidth - pad * 2 });
+    });
+    doc.moveTo(left, y + rowHeight).lineTo(left + usable, y + rowHeight).stroke();
+    y += rowHeight;
+  }
+
+  doc.strokeColor('#000');
+  doc.x = left;
+  doc.y = y;
+  doc.font(fonts.regular).fontSize(12);
+  doc.moveDown(0.3);
 }
 
 function addFooter(doc: PDFKit.PDFDocument, pageNum: number, total: number, options: PdfOptions, fonts: FontPair): void {
@@ -205,13 +247,11 @@ function addFooter(doc: PDFKit.PDFDocument, pageNum: number, total: number, opti
     doc.text(options.caseNumber, 72, footerY, { lineBreak: false });
   }
 
-  // 页码 (右侧)
+  // 页码 (右侧) — 手动算 x 右对齐; pdfkit 的 width+align 在此坐标下会误判溢出并新建空白页
   if (options.showPageNumber !== false) {
-    doc.text(`第 ${pageNum} 页 / 共 ${total} 页`, 0, footerY, {
-      align: 'right',
-      width: doc.page.width - 72,
-      lineBreak: false,
-    });
+    const label = `第 ${pageNum} 页 / 共 ${total} 页`;
+    const x = doc.page.width - 72 - doc.widthOfString(label);
+    doc.text(label, x, footerY, { lineBreak: false });
   }
 
   doc.fillColor('#000');
