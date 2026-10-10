@@ -135,7 +135,7 @@ dsh case set def-001 evidence 证据.json        # 数组或 {evidence:[...]} �
 dsh apply-fixes --case def-001
 #    → outputs/defense-patched.md
 
-# ⑥ 攻防推演: 模拟原被告多轮交锋, 输出风险走向与下一步建议
+# ⑥ 攻防推演: 模拟原被告多轮交锋, 输出风险走向与下一步建议。 dsh simulate --case qsz2 --mode ai 则使用ai模式，会出分
 dsh simulate --case def-001
 
 # ⑦ 导出法院排版 PDF
