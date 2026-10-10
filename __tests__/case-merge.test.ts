@@ -2,7 +2,7 @@
  * mergeAnalysisIntoCase + normalizeEvidenceArray — 案件层纯函数单元测试
  */
 import { describe, it, expect } from 'vitest';
-import { mergeAnalysisIntoCase, normalizeEvidenceArray } from '../src/case/case';
+import { applyIdentityProtection, mergeAnalysisIntoCase, normalizeEvidenceArray } from '../src/case/case';
 import type { Case } from '../src/case/types';
 import type { ComplaintAnalysis } from '../src/analyzer/complaint-types';
 
@@ -105,6 +105,78 @@ describe('mergeAnalysisIntoCase', () => {
     const m = mergeAnalysisIntoCase(base, mkAnalysis());
     expect(m.defendantFacts).toBe('被告自己的版本');
     expect(m.evidence).toHaveLength(1);
+  });
+});
+
+describe('mergeAnalysisIntoCase (--keep-identity)', () => {
+  it('身份字段不覆盖不回填; 案由/诉请/事实照常回填', () => {
+    const base = mkCase({
+      plaintiff: { name: '化名甲', role: '原告' },
+      defendant: { name: '化名乙', role: '被告' },
+    });
+    const m = mergeAnalysisIntoCase(base, mkAnalysis(), { keepIdentity: true });
+    expect(m.plaintiff.name).toBe('化名甲');
+    expect(m.plaintiff.contact).toBeUndefined();
+    expect(m.defendant.name).toBe('化名乙');
+    expect(m.defendant.address).toBeUndefined();
+    expect(m.claims).toHaveLength(2);
+    expect(m.facts).toContain('微博');
+  });
+
+  it('律师身份也不从拆解回填', () => {
+    const a = mkAnalysis({
+      parties: {
+        原告: { name: '王女士', role: '原告' },
+        被告: { name: '赵某', role: '被告' },
+        律师: { name: '某律师', role: '律师', contact: '139' },
+      },
+    });
+    expect(mergeAnalysisIntoCase(mkCase(), a, { keepIdentity: true }).lawyer).toBeUndefined();
+  });
+});
+
+describe('applyIdentityProtection', () => {
+  it('用户值优先; case 缺失的证件号/电话打码; 住所保留 (管辖反点要用)', () => {
+    const c = mkCase({
+      plaintiff: { name: '化名甲', role: '原告' },
+      defendant: { name: '化名乙', role: '被告', idNumber: '用户自填证件' },
+    });
+    const a = mkAnalysis({
+      parties: {
+        原告: { name: '王女士', role: '原告', address: '北京市海淀区', contact: '13800001111' },
+        被告: { name: '赵某', role: '被告', idNumber: '110101199001011234', address: '上海市黄浦区' },
+      },
+    });
+    const r = applyIdentityProtection(a, c);
+    expect(r.parties.原告.name).toBe('化名甲');
+    expect(r.parties.原告.contact).toBe('[已脱敏]');
+    expect(r.parties.原告.address).toBe('北京市海淀区'); // case 未填 → 保留原值
+    expect(r.parties.被告.name).toBe('化名乙');
+    expect(r.parties.被告.idNumber).toBe('用户自填证件');
+    expect(r.parties.被告.address).toBe('上海市黄浦区');
+    expect(r.warnings.some((w) => w.includes('已脱敏'))).toBe(true);
+    // 纯函数: 原对象不动
+    expect(a.parties.被告.idNumber).toBe('110101199001011234');
+  });
+
+  it('占位姓名视为未提供 → 保留起诉状姓名 (不硬删)', () => {
+    const r = applyIdentityProtection(mkAnalysis(), mkCase());
+    expect(r.parties.原告.name).toBe('王女士');
+    expect(r.parties.原告.contact).toBe('[已脱敏]'); // mkAnalysis 默认原告有电话
+    expect(r.warnings.some((w) => w.includes('已脱敏'))).toBe(true);
+  });
+
+  it('律师的证件号/电话同样脱敏', () => {
+    const a = mkAnalysis({
+      parties: {
+        原告: { name: '王女士', role: '原告' },
+        被告: { name: '赵某', role: '被告' },
+        律师: { name: '某律师', role: '律师', contact: '13900001111', idNumber: '110101198001011234' },
+      },
+    });
+    const r = applyIdentityProtection(a, mkCase());
+    expect(r.parties.律师?.contact).toBe('[已脱敏]');
+    expect(r.parties.律师?.idNumber).toBe('[已脱敏]');
   });
 });
 

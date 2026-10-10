@@ -42,6 +42,9 @@ dsh analyze-complaint data/cases/<id>/complaint.md --case <id> --draft
 送达日期 (`servedAt`) 起诉状里没有、只有当事人知道 — 若建案时没拿到, 追问时要补记:
 `dsh case set <id> servedAt <YYYY-MM-DD>`, 否则 `case show` 的答辩期/管辖异议窗口倒计时无法生效。
 
+用户在意隐私时, 拆解加 `--keep-identity`: 手填身份字段不被覆盖/回填, 落盘 JSON 证件号/电话脱敏
+(化名建案 + 此开关 = 后续 AI 调用只见化名)。主动问一句是否需要。
+
 → `data/cases/<id>/complaint-analysis.json` (主体/诉请/事实/证据 + 四要件评分)
 
 ### 3. 先出一版初稿 (让用户看到全貌)

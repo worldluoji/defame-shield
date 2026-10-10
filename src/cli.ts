@@ -64,7 +64,7 @@ caseCmd
   .action((id: string, flags: { json?: boolean }) => caseShowCommand(id, flags));
 caseCmd
   .command('set <id> <key> <value>')
-  .description('修改被告侧字段 (当前仅 servedAt=收到起诉状副本日期, 用于答辩期倒计时; 原告/诉请/事实由拆解回填,不走此命令)')
+  .description('后补被告侧字段: servedAt (答辩期倒计时) / defendantFacts (被告方陈述) / evidence (证据清单 JSON, 整组替换); 原告/诉请/事实由拆解回填, 不走此命令')
   .action((id: string, key: string, value: string) => caseSetCommand(id, key, value));
 
 const analyzeCmd = program.command('analyze-complaint <file>').description('拆解原告起诉状 → JSON');
@@ -72,6 +72,7 @@ analyzeCmd
   .option('--draft', '纯模板 (关键词抽取), 不调 LLM', false)
   .option('--provider <provider>', 'LLM provider (deepseek/minimax)')
   .option('--case <id>', '关联到本地案件 (输出到 data/cases/<id>/complaint-analysis.json)')
+  .option('--keep-identity', '身份保护 (需已建案): 手填的姓名/证件/电话不被拆解结果覆盖或回填; 落盘 JSON 中证件号/电话脱敏 — 保护落盘数据与后续 AI 调用 (AI 拆解这一跳的起诉状原文仍会上云, 绝对不上云请配 --draft)', false)
   .option('--out <path>', '自定义输出路径')
   .option('--silent', '静默模式, 不输出 JSON 内容', false)
   .option('--extra <text>', '给 LLM 的额外指令')

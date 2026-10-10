@@ -12,8 +12,9 @@ import { detectFormat } from '../converters/format-detector.js';
 import { out, die } from '../utils/console.js';
 import { writeJsonFile } from '../utils/json.js';
 import { loadConfig } from '../config/config.js';
-import { caseDir, loadCase, mergeAnalysisIntoCase, updateCase } from '../case/case.js';
+import { applyIdentityProtection, caseDir, loadCase, mergeAnalysisIntoCase, updateCase } from '../case/case.js';
 import { confirmCloudDisclosure } from '../utils/cloud-consent.js';
+import type { ComplaintAnalysis } from '../analyzer/complaint-types.js';
 
 export interface AnalyzeFlags {
   draft?: boolean;
@@ -23,6 +24,8 @@ export interface AnalyzeFlags {
   extra?: string;
   /** 静默模式 (不输出 JSON, 只输出消息) */
   silent?: boolean;
+  /** 身份保护 (需 --case): 不覆盖/不回填手填身份字段, 落盘 JSON 证件号/电话脱敏 */
+  keepIdentity?: boolean;
 }
 
 export async function analyzeComplaintCommand(input: string, flags: AnalyzeFlags): Promise<void> {
@@ -69,40 +72,58 @@ export async function analyzeComplaintCommand(input: string, flags: AnalyzeFlags
     extraInstruction: flags.extra,
   });
 
+  const config = loadConfig();
+  const existing = flags.case ? loadCase(config, flags.case) : null;
+
+  if (flags.keepIdentity && !existing) {
+    die(`--keep-identity 以 case.json 手填值为保护基准, 需先建案: dsh case new ${flags.case ?? '<id>'} 后重新拆解`);
+  }
+  if (flags.keepIdentity && !draft) {
+    out.warn('提示: AI 拆解这一跳仍会把起诉状原文发给大模型 — 本开关保护的是落盘 JSON 与后续所有 AI 调用; 原文也不上云请用 --draft');
+  }
+
+  const protect = (a: ComplaintAnalysis): ComplaintAnalysis =>
+    existing ? applyIdentityProtection(a, existing) : a;
+
   if (!result.ok) {
     out.error(result.error);
     if (result.partialDraft) {
       out.warn('已 fallback 到 draft 模式, 保存到 out 指定路径');
       const outPath = resolveOutPath(flags, textInput);
-      writeJsonFile(outPath, result.partialDraft);
+      writeJsonFile(outPath, flags.keepIdentity ? protect(result.partialDraft) : result.partialDraft);
     }
     process.exit(1);
   }
 
+  const finalAnalysis = flags.keepIdentity ? protect(result.analysis) : result.analysis;
+
   // 输出路径
   const outPath = resolveOutPath(flags, textInput);
-  writeJsonFile(outPath, result.analysis);
+  writeJsonFile(outPath, finalAnalysis);
 
   out.success(`已生成拆解结果: ${outPath}`);
+  if (flags.keepIdentity) {
+    out.info('身份保护: 落盘 JSON 当事人证件号/电话已按 case.json 对齐/脱敏, 回填不触碰手填身份字段');
+  }
 
-  // --case 且 case.json 已存在: 自动回填原告/诉请/事实/法院, 免去手动录入
-  if (flags.case) {
-    const config = loadConfig();
-    const existing = loadCase(config, flags.case);
-    if (existing) {
-      updateCase(config, mergeAnalysisIntoCase(existing, result.analysis));
-      out.success(`已回填 case.json: 原告 ${result.analysis.parties.原告.name || '(未识别)'} / 诉请 ${result.analysis.claims.length} 条 / 法院 ${result.analysis.courtOfFiling ?? '(未识别)'}`);
-      if (result.analysis.filingDate && !existing.servedAt) {
-        out.info(`起诉状落款日期: ${result.analysis.filingDate}。答辩期自你收到副本之日起算 15 日 (管辖异议须同期提出) — 记录送达日期可获倒计时: dsh case set ${flags.case} servedAt <YYYY-MM-DD>`);
-      }
-    } else {
-      out.info(`该目录尚无 case.json — 运行 \`dsh case new ${flags.case}\` 建案后重新拆解可自动回填当事人信息`);
+  // --case 且 case.json 已存在: 自动回填案由/诉请/事实/法院, 免去手动录入
+  if (flags.case && existing) {
+    updateCase(config, mergeAnalysisIntoCase(existing, finalAnalysis, { keepIdentity: flags.keepIdentity }));
+    out.success(
+      flags.keepIdentity
+        ? `已回填 case.json: 诉请 ${finalAnalysis.claims.length} 条 / 法院 ${finalAnalysis.courtOfFiling ?? '(未识别)'} (身份字段保持你的手填值)`
+        : `已回填 case.json: 原告 ${finalAnalysis.parties.原告.name || '(未识别)'} / 诉请 ${finalAnalysis.claims.length} 条 / 法院 ${finalAnalysis.courtOfFiling ?? '(未识别)'}`,
+    );
+    if (finalAnalysis.filingDate && !existing.servedAt) {
+      out.info(`起诉状落款日期: ${finalAnalysis.filingDate}。答辩期自你收到副本之日起算 15 日 (管辖异议须同期提出) — 记录送达日期可获倒计时: dsh case set ${flags.case} servedAt <YYYY-MM-DD>`);
     }
+  } else if (flags.case) {
+    out.info(`该目录尚无 case.json — 运行 \`dsh case new ${flags.case}\` 建案后重新拆解可自动回填当事人信息`);
   }
 
   if (!flags.silent) {
     // 控制台也输出摘要
-    const a = result.analysis;
+    const a = finalAnalysis;
     out.info(`置信度: ${(a.confidence * 100).toFixed(0)}%`);
     out.info(`诉请: ${a.claims.length} 条`);
     out.info(`法条: ${a.legalBasis.length} 条`);

@@ -107,6 +107,8 @@ dsh case new def-001
 #    .pdf/.docx 自动先转 markdown; --draft = 纯正则, 不调 LLM
 dsh analyze-complaint 起诉状.pdf --case def-001 --draft
 #    → data/cases/def-001/complaint-analysis.json
+#    在意隐私? 加 --keep-identity: 手填的身份字段不被覆盖/回填,
+#    落盘 JSON 里证件号/电话脱敏 — 后续 AI 调用只会看到你的化名 (AI 拆解首跳的原文仍会上云)
 
 # ③ 生成答辩状 (站被告视角, 8 反点自动选型: 每条诉请匹配最适反点)
 #    拆解结果自动使用; 输出当前稿 defense.md, 重生成时旧版归档 outputs/history/
@@ -198,6 +200,7 @@ dsh case list / show <id> [--json]                  案件列表/详情 (show �
 dsh convert <file> [--out|--native|--print-meta|--check]  PDF/Word → markdown (纯 Node); PPT/Excel/HTML 需 MarkItDown
 dsh analyze-complaint <起诉状> [选项]               拆解 → complaint-analysis.json
   --case <id>          输出到案件目录并自动回填 case.json (推荐)
+  --keep-identity      身份保护: 手填身份字段不被覆盖/回填, 落盘 JSON 证件号/电话脱敏
   --draft              纯关键词/正则抽取, 不调 LLM
   --extra <text>       给 LLM 的补充指令      --out <path>  自定义输出路径
 dsh generate <type> --case <id> [选项]              生成文书 (letter/complaint/defense/evidence-list)

@@ -86,13 +86,20 @@ export function updateCase(config: DshConfig, c: Case): Case {
 
 const CAUSES: ReadonlyArray<Case['cause']> = ['网络侵权名誉权', '传统媒体名誉权', '其他名誉权纠纷'];
 
+export interface MergeOpts {
+  /** 身份保护: 双方姓名/证件号/电话/住所/律师一律以 case.json 手填为准, 不覆盖不回填 */
+  keepIdentity?: boolean;
+}
+
 /**
  * 起诉状拆解结果回填案件 (纯函数, 返回新对象):
  * 起诉状是权威来源 — 原告/诉请/案由直接覆盖;
  * 被告/法院/律师仅补齐空缺字段 (以人工填写为准, "[待补充" 占位视为空)。
+ * opts.keepIdentity 时身份字段完全不动 (只回填案由/事实/诉请/法院)。
  */
-export function mergeAnalysisIntoCase(c: Case, a: ComplaintAnalysis): Case {
+export function mergeAnalysisIntoCase(c: Case, a: ComplaintAnalysis, opts: MergeOpts = {}): Case {
   const isBlank = (s: string | undefined) => !s || s.startsWith('[待补充');
+  const keep = opts.keepIdentity === true;
   const p = a.parties.原告;
   const d = a.parties.被告;
 
@@ -103,25 +110,71 @@ export function mergeAnalysisIntoCase(c: Case, a: ComplaintAnalysis): Case {
   return {
     ...c,
     cause: (CAUSES as ReadonlyArray<string>).includes(a.cause) ? (a.cause as Case['cause']) : c.cause,
-    plaintiff: {
-      name: p.name || c.plaintiff.name,
-      role: '原告',
-      idNumber: p.idNumber ?? c.plaintiff.idNumber,
-      address: p.address ?? c.plaintiff.address,
-      contact: p.contact ?? c.plaintiff.contact,
-    },
-    defendant: {
-      ...c.defendant,
-      name: isBlank(c.defendant.name) ? (d.name || c.defendant.name) : c.defendant.name,
-      idNumber: isBlank(c.defendant.idNumber) ? d.idNumber : c.defendant.idNumber,
-      address: isBlank(c.defendant.address) ? d.address : c.defendant.address,
-      contact: isBlank(c.defendant.contact) ? d.contact : c.defendant.contact,
-    },
-    lawyer:
-      c.lawyer ?? (a.parties.律师 ? { ...a.parties.律师, role: '律师' as const } : undefined),
+    plaintiff: keep
+      ? c.plaintiff
+      : {
+          name: p.name || c.plaintiff.name,
+          role: '原告',
+          idNumber: p.idNumber ?? c.plaintiff.idNumber,
+          address: p.address ?? c.plaintiff.address,
+          contact: p.contact ?? c.plaintiff.contact,
+        },
+    defendant: keep
+      ? c.defendant
+      : {
+          ...c.defendant,
+          name: isBlank(c.defendant.name) ? (d.name || c.defendant.name) : c.defendant.name,
+          idNumber: isBlank(c.defendant.idNumber) ? d.idNumber : c.defendant.idNumber,
+          address: isBlank(c.defendant.address) ? d.address : c.defendant.address,
+          contact: isBlank(c.defendant.contact) ? d.contact : c.defendant.contact,
+        },
+    lawyer: keep
+      ? c.lawyer
+      : c.lawyer ?? (a.parties.律师 ? { ...a.parties.律师, role: '律师' as const } : undefined),
     facts: isBlank(c.facts) ? factsParts.join('; ').slice(0, 500) : c.facts,
     claims: a.claims.length > 0 ? a.claims.map((cl) => ({ content: cl.content, amount: cl.amount })) : c.claims,
     court: isBlank(c.court) ? a.courtOfFiling : c.court,
+  };
+}
+
+/**
+ * --keep-identity 落盘前脱敏 (纯函数): 拆解 JSON 的身份字段以 case.json 手填为准 —
+ * 姓名/住所用户填了 (非占位) 则用用户值; 证件号/电话 case.json 没有对应值时打码为 [已脱敏]。
+ * 未提供对应值时姓名/住所保留起诉状原值 — 渲染与管辖反点要用, 工具不硬删也不虚构。
+ */
+export function applyIdentityProtection(a: ComplaintAnalysis, c: Case): ComplaintAnalysis {
+  const valid = (s: string | undefined): boolean => !!s && !s.startsWith('[待补充');
+  const source = { 原告: c.plaintiff, 被告: c.defendant, 律师: c.lawyer } as const;
+  const parties = { ...a.parties };
+  const masked: string[] = [];
+  for (const key of ['原告', '被告', '律师'] as const) {
+    const ex = parties[key];
+    if (!ex) continue;
+    const src = source[key];
+    const next = { ...ex };
+    if (src && valid(src.name)) next.name = src.name;
+    if (src && valid(src.address)) next.address = src.address;
+    if (src && valid(src.idNumber)) next.idNumber = src.idNumber;
+    else if (ex.idNumber) {
+      next.idNumber = '[已脱敏]';
+      masked.push(`parties.${key}.证件号`);
+    }
+    if (src && valid(src.contact)) next.contact = src.contact;
+    else if (ex.contact) {
+      next.contact = '[已脱敏]';
+      masked.push(`parties.${key}.电话`);
+    }
+    parties[key] = next;
+  }
+  return {
+    ...a,
+    parties,
+    warnings: [
+      ...a.warnings,
+      masked.length > 0
+        ? `身份保护已启用: ${masked.join(', ')} 已脱敏 (case.json 未填对应值) — 原值仅存于 complaint.md`
+        : '身份保护已启用: 当事人身份字段以 case.json 手填为准',
+    ],
   };
 }
 
