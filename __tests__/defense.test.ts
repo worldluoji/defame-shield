@@ -1,10 +1,24 @@
 /**
  * 答辩状生成器 (v2) 集成测试
  */
-import { describe, it, expect } from 'vitest';
+import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { generateDefense } from '../src/generators/defense';
 import { analyzeComplaint } from '../src/analyzer/complaint-parser';
+import { callLLM } from '../src/llm/client';
 import type { Case } from '../src/case/types';
+
+vi.mock('../src/llm/client', () => ({
+  callLLM: vi.fn(),
+  AI_MODELS: {
+    deepseek: { maxOutputTokens: 8192 },
+    minimax: { maxOutputTokens: 16384 },
+  },
+  resolveProvider: (p?: string) => p ?? 'deepseek',
+}));
+
+function llmOk(text: string) {
+  return { ok: true as const, text, provider: 'deepseek' as const, model: 'mock', elapsedMs: 1 };
+}
 
 const SAMPLE_COMPLAINT = `# 民事起诉状
 
@@ -235,10 +249,12 @@ describe('generateDefense (draft 模式)', () => {
 });
 
 describe('generateDefense (AI 模式失败回退)', () => {
+  beforeEach(() => {
+    vi.mocked(callLLM).mockReset();
+  });
+
   it('LLM 不可用时返回 draft fallback', async () => {
-    delete process.env.DEEPSEEK_API_KEY;
-    delete process.env.MINIMAX_API_KEY;
-    process.env.MODEL_PROVIDER = 'deepseek';
+    vi.mocked(callLLM).mockResolvedValue({ ok: false, code: 'missing_key', error: 'Missing API key' });
 
     const a = await analyzeComplaint(SAMPLE_COMPLAINT, { draft: true });
     if (!a.ok) throw new Error('analyze fail');
@@ -249,7 +265,74 @@ describe('generateDefense (AI 模式失败回退)', () => {
     });
     expect(r.ok).toBe(false);
     if (r.ok) return;
+    expect(r.error).toContain('missing_key');
     expect(r.draftFallback).toBeDefined();
     expect(r.draftFallback).toContain('总体答辩策略');
+  });
+});
+
+describe('generateDefense (AI 润色截断处理)', () => {
+  beforeEach(() => {
+    vi.mocked(callLLM).mockReset();
+  });
+
+  async function analysis() {
+    const a = await analyzeComplaint(SAMPLE_COMPLAINT, { draft: true });
+    if (!a.ok) throw new Error('analyze fail');
+    return a.analysis;
+  }
+
+  const FULL_BODY = [
+    '# 民事答辩状',
+    '## 对各项诉讼请求的答辩',
+    '诉请 1 ...',
+    '## 类案参考（裁判要点）',
+    '## 答辩证据指引',
+    '此致',
+    '答辩人：李四',
+  ].join('\n');
+
+  it('正文完整但缺免责声明尾部 → 从 draft 拼装, 不再调 LLM', async () => {
+    vi.mocked(callLLM).mockResolvedValue(llmOk(FULL_BODY));
+    const r = await generateDefense({ analysis: await analysis(), case: SAMPLE_CASE, draft: false });
+    expect(r.ok).toBe(true);
+    if (!r.ok) return;
+    expect(r.content).toContain('## ⚠️ 重要提示');
+    expect(callLLM).toHaveBeenCalledTimes(1);
+  });
+
+  it('真截断 → 自动续写, 拼上尾段后采纳', async () => {
+    const partial = '# 民事答辩状\n\n## 对各项诉讼请求的答辩\n\n诉请 1 驳';
+    vi.mocked(callLLM)
+      .mockResolvedValueOnce(llmOk(partial))
+      .mockResolvedValueOnce(llmOk('回。\n\n## 类案参考\n\n## 答辩证据指引\n\n此致\n\n## ⚠️ 重要提示\n\n1. 本答辩状系自动生成初稿'));
+    const r = await generateDefense({ analysis: await analysis(), case: SAMPLE_CASE, draft: false });
+    expect(r.ok).toBe(true);
+    if (!r.ok) return;
+    expect(r.content).toContain('## ⚠️ 重要提示');
+    expect(callLLM).toHaveBeenCalledTimes(2);
+    // 续写请求把已输出内容作为 assistant 消息回喂
+    const contMsgs = vi.mocked(callLLM).mock.calls[1]![0];
+    expect(contMsgs.some((m) => m.role === 'assistant')).toBe(true);
+  });
+
+  it('续写 2 次仍截断 → 拒绝采纳, 附 draft fallback', async () => {
+    vi.mocked(callLLM).mockResolvedValue(llmOk('# 民事答辩状\n\n## 对各项诉讼请求的答辩\n\n诉请 1 驳'));
+    const r = await generateDefense({ analysis: await analysis(), case: SAMPLE_CASE, draft: false });
+    expect(r.ok).toBe(false);
+    if (r.ok) return;
+    expect(r.error).toContain('续写 2 次');
+    expect(r.draftFallback).toContain('总体答辩策略');
+    expect(callLLM).toHaveBeenCalledTimes(3); // 1 初稿 + 2 续写
+  });
+
+  it('续写调用失败 → 拒绝采纳并说明原因', async () => {
+    vi.mocked(callLLM)
+      .mockResolvedValueOnce(llmOk('# 民事答辩状\n\n## 对各项诉讼请求的答辩\n\n诉请 1 驳'))
+      .mockResolvedValueOnce({ ok: false, code: 'timeout', error: 'timed out' });
+    const r = await generateDefense({ analysis: await analysis(), case: SAMPLE_CASE, draft: false });
+    expect(r.ok).toBe(false);
+    if (r.ok) return;
+    expect(r.error).toContain('续写调用失败');
   });
 });

@@ -10,6 +10,8 @@ export interface ModelConfig {
   model: string;
   apiKeyEnv: string;
   defaultTimeoutMs: number;
+  /** 单次输出 token 上限 (生成长文书时按此传 max_tokens) */
+  maxOutputTokens: number;
 }
 
 export const AI_MODELS: Record<ModelProvider, ModelConfig> = {
@@ -18,16 +20,23 @@ export const AI_MODELS: Record<ModelProvider, ModelConfig> = {
     model: 'deepseek-flash',
     apiKeyEnv: 'DEEPSEEK_API_KEY',
     defaultTimeoutMs: 90_000,
+    maxOutputTokens: 8192,
   },
   minimax: {
     endpoint: 'https://api.minimax.chat/v1/text/chatcompletion_v2',
     model: 'MiniMax-M3',
     apiKeyEnv: 'MINIMAX_API_KEY',
     defaultTimeoutMs: 90_000,
+    maxOutputTokens: 16384,
   },
 };
 
 export const DEFAULT_MODEL: ModelProvider = 'deepseek';
+
+/** 解析生效 provider: 显式指定 > env MODEL_PROVIDER > 默认 */
+export function resolveProvider(p?: ModelProvider): ModelProvider {
+  return p ?? ((process.env.MODEL_PROVIDER as ModelProvider | undefined) || DEFAULT_MODEL);
+}
 
 export interface LLMMessage {
   role: 'system' | 'user' | 'assistant';
@@ -67,7 +76,7 @@ export interface LLMOptions {
  * 瞬时故障 (网络错误/超时/429/5xx) 自动重试; 配置与协议错误不重试。
  */
 export async function callLLM(messages: LLMMessage[], opts: LLMOptions = {}): Promise<LLMResult> {
-  const provider = opts.provider ?? ((process.env.MODEL_PROVIDER as ModelProvider) || DEFAULT_MODEL);
+  const provider = resolveProvider(opts.provider);
   if (!(provider in AI_MODELS)) {
     return {
       ok: false,

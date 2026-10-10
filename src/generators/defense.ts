@@ -9,7 +9,7 @@
  * 输出: Markdown 答辩状
  */
 
-import { callLLM } from '../llm/client.js';
+import { AI_MODELS, callLLM, resolveProvider, type LLMMessage } from '../llm/client.js';
 import { selectStrategies, selectStrategyForClaim, type RebuttalStrategy } from '../rebuttal/strategies.js';
 import type { ComplaintAnalysis, ParsedClaim, CaseReference } from '../analyzer/complaint-types.js';
 import type { Case, Evidence } from '../case/types.js';
@@ -70,29 +70,53 @@ export async function generateDefense(opts: DefenseGenerateOpts): Promise<Defens
     };
   }
 
-  // 4. AI 模式: 调 LLM 润色
-  const llmResult = await callLLM(buildDefensePrompts(baseContent, opts, overallStrategies, caseRefs), {
-    provider: opts.provider,
-    temperature: 0.3,
-    maxTokens: 8000,
-  });
+  // 4. AI 模式: 调 LLM 润色 (按 provider 输出上限给额度, 截断时先拼装再续写)
+  const provider = resolveProvider(opts.provider as 'deepseek' | 'minimax' | undefined);
+  const maxTokens = AI_MODELS[provider].maxOutputTokens;
+  const messages = buildDefensePrompts(baseContent, opts, overallStrategies, caseRefs);
 
+  const llmResult = await callLLM(messages, { provider, temperature: 0.3, maxTokens });
   if (!llmResult.ok) {
     return {
       ok: false,
-      error: `LLM 润色失败 (${llmResult.code}): ${llmResult.error}\n已 fallback 到 draft 模式`,
+      error: `LLM 润色调用失败 (${llmResult.code}): ${llmResult.error}`,
       draftFallback: baseContent,
     };
   }
 
-  const polished = stripMdFence(llmResult.text);
-  // 输出必附免责声明是领域不变量: "⚠️ 重要提示" 段缺失基本可断定输出被 maxTokens 拦腰截断
-  if (!polished.includes('⚠️ 重要提示')) {
-    return {
-      ok: false,
-      error: 'AI 润色输出缺少 "⚠️ 重要提示" 免责声明段 (疑似输出被截断), 未予采纳, 请使用 draft 初稿',
-      draftFallback: baseContent,
-    };
+  let polished = stripMdFence(llmResult.text);
+  let resumed = 0;
+  // "⚠️ 重要提示" 是领域不变量 (输出必附免责声明):
+  // 正文完整只缺尾部 → 从 draft 拼回 (尾部本就是确定性模板); 正文也断了 → 让 LLM 续写, 最多 2 次
+  while (!polished.includes('⚠️ 重要提示')) {
+    if (bodyComplete(polished)) {
+      polished = spliceTemplateTail(polished, baseContent);
+      break;
+    }
+    if (resumed >= 2) {
+      return {
+        ok: false,
+        error: `AI 润色输出被截断 (续写 ${resumed} 次后仍缺少 "⚠️ 重要提示" 免责声明段), 未予采纳`,
+        draftFallback: baseContent,
+      };
+    }
+    resumed++;
+    const cont = await callLLM(
+      [
+        ...messages,
+        { role: 'assistant', content: polished },
+        { role: 'user', content: '你的输出被截断了。请从中断处直接继续输出剩余部分, 不要重复任何已输出内容, 直到完整输出 "## ⚠️ 重要提示" 免责声明段与文末附件清单为止。' },
+      ],
+      { provider, temperature: 0.3, maxTokens },
+    );
+    if (!cont.ok) {
+      return {
+        ok: false,
+        error: `AI 润色输出被截断, 续写调用失败 (${cont.code}): ${cont.error}`,
+        draftFallback: baseContent,
+      };
+    }
+    polished += stripMdFence(cont.text);
   }
 
   return {
@@ -103,6 +127,18 @@ export async function generateDefense(opts: DefenseGenerateOpts): Promise<Defens
     strategies: overallStrategies,
     caseRefs,
   };
+}
+
+/** 润色输出是否已写到落款 (说明中段结构齐全, 只欠模板尾部) */
+function bodyComplete(polished: string): boolean {
+  return ['对各项诉讼请求的答辩', '类案参考', '答辩证据指引', '此致'].every((m) => polished.includes(m));
+}
+
+/** 正文完整但缺 "## ⚠️ 重要提示" 及其后附件 (确定性模板内容) → 从 draft 初稿拼回尾部 */
+function spliceTemplateTail(polished: string, draft: string): string {
+  const anchor = draft.indexOf('## ⚠️ 重要提示');
+  if (anchor === -1) return polished;
+  return `${polished.trimEnd()}\n\n${draft.slice(anchor)}`;
 }
 
 /**
@@ -342,7 +378,7 @@ function buildDefensePrompts(
   opts: DefenseGenerateOpts,
   strategies: RebuttalStrategy[],
   _caseRefs: CaseReference[],
-): Array<{ role: 'system' | 'user'; content: string }> {
+): LLMMessage[] {
   const system = `你是一名中国民事诉讼律师, 专长名誉权纠纷案件的**被告应诉**工作。
 
 你的任务是**基于以下拆解结果 + 反驳策略 + 模板初稿**, 生成一份专业、严谨、可直接用于诉讼的**民事答辩状**。

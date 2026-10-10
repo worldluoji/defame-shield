@@ -116,7 +116,7 @@ async function generateDefenseFromAnalysis(flags: GenerateFlags): Promise<void> 
   if (!result.ok) {
     out.error(result.error);
     if (result.draftFallback) {
-      out.warn('已 fallback 到 draft 模式, 保存到 outputs/');
+      out.warn('未采纳 AI 润色稿 — 已交付 draft 初稿 (事实与反点内容一致, 仅未经润色), 保存到 outputs/');
       writeOutput(outDir, 'defense', result.draftFallback, flags.output);
     }
     process.exit(1);
