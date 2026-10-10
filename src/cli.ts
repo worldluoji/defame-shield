@@ -83,8 +83,9 @@ fillCmd
   .option('--out <path>', '输出路径 (默认: <原名>-filled.md)')
   .action(fillDefenseCommand);
 
-const fillJsonCmd = program.command('fill <analysis>').description('非交互回填拆解 JSON 字段 (点路径=值, 留 _fillLog 审计; 供 agent/批量使用)');
+const fillJsonCmd = program.command('fill [analysis]').description('非交互回填拆解 JSON 字段 (点路径=值, 留 _fillLog 审计; 供 agent/批量使用)');
 fillJsonCmd
+  .option('--case <id>', '案件 ID (自动定位 data/cases/<id>/complaint-analysis.json)')
   .option('--set <path=value>', '回填一项, 可重复 (如 --set "facts.time=2026-03-12")', (v: string, acc: string[]) => [...acc, v], [])
   .option('--from <json>', '批量回填文件: {路径: 值} 或 [{path, value, note?}]')
   .option('--allow-new', '允许新增 JSON 中尚不存在的末端字段 (父级路径须已存在; 如 draft 未产出的 filingDate)', false)

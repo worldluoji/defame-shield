@@ -2,6 +2,7 @@
  * dsh fill — 非交互式回填拆解结果 JSON (供 agent / 批量使用)
  *
  * dsh fill <analysis.json> [--set "路径=值"]... [--from patches.json] [--allow-new] [--out <json>]
+ * dsh fill --case <id> ... — 自动定位案件目录内 complaint-analysis.json
  *
  * 定位: complaint-analysis.json 是文书的唯一事实源 — 在这里补事实,
  * 重跑 `generate defense` 时对应的 [待补充] 占位符自然消失。
@@ -17,12 +18,14 @@
  *   - 全部成功才写盘 (原子); 任一路径非法则一条都不落
  *   - 每次回填在 JSON 顶层追加 _fillLog 审计记录 (path / previous / value / filledAt)
  */
-import { existsSync } from 'node:fs';
 import { readJsonFile, writeJsonFile } from '../utils/json.js';
 import { out, die } from '../utils/console.js';
+import { resolveAnalysisPath } from '../case/pipeline.js';
 import type { ComplaintAnalysis, FillLogEntry } from '../analyzer/complaint-types.js';
 
 export interface FillAnalysisFlags {
+  /** 案件 ID: 自动定位 complaint-analysis.json (与位置参数二选一) */
+  case?: string;
   /** 重复的 --set "路径=值" 项 (按第一个 = 拆分) */
   set?: string[];
   /** 批量回填 JSON: {路径: 值} 或 [{path, value, note?}] */
@@ -211,8 +214,8 @@ export function applyFillPatches(
   return applied;
 }
 
-export async function fillAnalysisCommand(analysisPath: string, flags: FillAnalysisFlags): Promise<void> {
-  if (!existsSync(analysisPath)) die(`拆解结果文件不存在: ${analysisPath}`);
+export async function fillAnalysisCommand(analysisPath: string | undefined, flags: FillAnalysisFlags): Promise<void> {
+  const resolvedPath = resolveAnalysisPath(analysisPath, flags.case);
   const pairs = flags.set ?? [];
   if (pairs.length === 0 && !flags.from) {
     die('未指定任何回填项 — 用 --set "路径=值" (可重复) 或 --from patches.json');
@@ -223,7 +226,7 @@ export async function fillAnalysisCommand(analysisPath: string, flags: FillAnaly
     ...(flags.from ? parseFrom(flags.from) : []),
   ];
 
-  const analysis = readJsonFile<ComplaintAnalysis>(analysisPath);
+  const analysis = readJsonFile<ComplaintAnalysis>(resolvedPath);
   let applied: Array<{ path: string; old: unknown; value: string | number | boolean }>;
   try {
     applied = applyFillPatches(analysis, patches, { allowNew: flags.allowNew });
@@ -244,12 +247,12 @@ export async function fillAnalysisCommand(analysisPath: string, flags: FillAnaly
   });
   analysis._fillLog = log;
 
-  const outPath = flags.out ?? analysisPath;
+  const outPath = flags.out ?? resolvedPath;
   writeJsonFile(outPath, analysis);
   for (const a of applied) {
     out.success(`${a.path}: ${JSON.stringify(a.old ?? '')} → ${JSON.stringify(a.value)}`);
   }
   out.info(`共回填 ${applied.length} 项 (_fillLog 审计记录累计 ${log.length} 条)`);
-  out.dim(outPath === analysisPath ? `已原地写回: ${outPath}` : `已另存: ${outPath}`);
+  out.dim(outPath === resolvedPath ? `已原地写回: ${outPath}` : `已另存: ${outPath}`);
   out.info(`下一步: dsh generate defense --case <id> — 案件内拆解结果会被自动使用, 重生成后对应 [待补充] 自然消失`);
 }

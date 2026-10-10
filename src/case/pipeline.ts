@@ -65,7 +65,7 @@ export function resolveAnalysisPath(explicit: string | undefined, caseId: string
         `  下一步: dsh analyze-complaint ${join(`data/cases/${caseId}`, 'complaint.md')} --case ${caseId} --draft`,
     );
   }
-  die('必须指定 --analysis <json> 或 --case <id> (自动定位案件目录内拆解结果)');
+  die('必须指定拆解结果: 显式 JSON 路径 (位置参数 / --analysis) 或 --case <id> (自动定位案件目录)');
 }
 
 /** 解析答辩状路径: 显式位置参数优先, 否则从 --case 定位当前稿; 失败 die 并给下一步 */
@@ -186,7 +186,7 @@ export function nextStepCommands(st: CaseStatus, caseId: string): string[] {
       return [`dsh generate defense --case ${caseId} --draft`];
     case '待补事实':
       return [
-        `dsh fill <analysis.json> --set "路径=值" --allow-new  (缺口见拆解 JSON; agent 模式逐条追问)`,
+        `dsh fill --case ${caseId} --set "路径=值" --allow-new  (缺口见拆解 JSON; agent 模式逐条追问)`,
         `重生成: dsh generate defense --case ${caseId}`,
       ];
     case '可自检修补':
