@@ -12,7 +12,7 @@
 import { callLLM } from '../llm/client.js';
 import { selectStrategies, selectStrategyForClaim, type RebuttalStrategy } from '../rebuttal/strategies.js';
 import type { ComplaintAnalysis, ParsedClaim, CaseReference } from '../analyzer/complaint-types.js';
-import type { Case } from '../case/types.js';
+import type { Case, Evidence } from '../case/types.js';
 import { parseLooseDate, elapsedYears } from '../utils/dates.js';
 import { stripMdFence } from '../utils/md.js';
 
@@ -176,13 +176,16 @@ ${analysis.facts.spread ? `原告主张的传播范围：${analysis.facts.spread
 
 ### 二、答辩人的事实主张
 
-[待补充: 答辩人需要在此节陈述自身的客观事实, 包括:
+${c.defendantFacts?.trim()
+    ? c.defendantFacts.trim()
+    : `[待补充: 答辩人需要在此节陈述自身的客观事实, 包括:
 1. 被告的真实身份/职业/与原告的关系
 2. 涉案内容的真实来源/性质
 3. 被告未实施被诉行为的事实依据
 4. 即使存在部分用词, 也是基于合理事由
 
-**重要**: 此节内容需要根据案件实际情况填写, 切勿虚构。]
+**重要**: 此节内容需要根据案件实际情况填写, 切勿虚构。 (录入: dsh case set ${c.id} defendantFacts "...")]`
+  }
 
 ---
 
@@ -207,7 +210,7 @@ ${Array.from(allLegalBasis).map((s, i) => `${i + 1}. ${s};`).join('\n')}
   sections.push(renderCaseReferences(caseRefs));
 
   // === 证据清单指引 ===
-  sections.push(renderEvidenceGuidance(overallStrategies));
+  sections.push(renderEvidenceGuidance(overallStrategies, c.evidence));
 
   // === 落款 ===
   sections.push(`---
@@ -305,27 +308,27 @@ function renderCaseReferences(caseRefs: CaseReference[]): string {
 }
 
 /**
- * 证据清单指引 — 告诉被告还需要补充哪些证据
+ * 证据清单指引 — 已掌握证据 (case.evidence) + 还需补充的证据 (按反点)
  */
-function renderEvidenceGuidance(strategies: RebuttalStrategy[]): string {
-  const allEvidence = new Set<string>();
-  for (const s of strategies) {
-    for (const e of s.evidenceToGather) {
-      allEvidence.add(e);
-    }
+function renderEvidenceGuidance(strategies: RebuttalStrategy[], owned: Evidence[]): string {
+  const hasGather = strategies.some((s) => s.evidenceToGather.length > 0);
+  if (!hasGather && owned.length === 0) return '';
+  let s = `## 答辩证据指引\n\n`;
+  if (owned.length > 0) {
+    s += `### 答辩人已掌握证据\n\n${owned.map((e) => `- **证据 ${e.index}**（${e.kind}）：${e.name} — 证明目的：${e.purpose}${e.source ? `（来源：${e.source}）` : ''}`).join('\n')}\n\n`;
   }
-  if (allEvidence.size === 0) return '';
-  let s = `## 答辩证据指引
-
-> **基于本案反点, 建议补充以下证据**（按反点分组）:
+  if (hasGather) {
+    s += `> **基于本案反点, 建议补充以下证据**（按反点分组）:
 
 `;
-  for (const strategy of strategies) {
-    s += `### ${strategy.name}
+    for (const strategy of strategies) {
+      if (strategy.evidenceToGather.length === 0) continue;
+      s += `### ${strategy.name}
 
 ${strategy.evidenceToGather.map((e) => `- ${e}`).join('\n')}
 
 `;
+    }
   }
   s += '---\n\n';
   return s;

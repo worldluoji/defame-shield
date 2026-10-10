@@ -4,8 +4,10 @@
  * dsh case show <id> — 案件详情: 流水线状态 + 残留占位符 + 推荐下一步
  */
 import inquirer from 'inquirer';
+import { existsSync } from 'node:fs';
 import { loadConfig } from '../config/config.js';
-import { caseDir, createCase, listCases, loadCase, updateCase } from '../case/case.js';
+import { caseDir, createCase, listCases, loadCase, normalizeEvidenceArray, updateCase } from '../case/case.js';
+import { readJsonFile } from '../utils/json.js';
 import { caseStage, deriveCaseStatus, nextStepCommands } from '../case/pipeline.js';
 import { defenseDeadline, parseLooseDate } from '../utils/dates.js';
 import { out, die } from '../utils/console.js';
@@ -26,6 +28,7 @@ export async function caseNewCommand(id: string): Promise<void> {
     lawyerContact: string;
     court: string;
     servedAt: string;
+    defendantFacts: string;
   }>([
     { type: 'input', name: 'title', message: '案件标题:', default: id },
     {
@@ -47,6 +50,11 @@ export async function caseNewCommand(id: string): Promise<void> {
       name: 'servedAt',
       message: '收到起诉状副本日期 (选填, YYYY-MM-DD; 答辩期 15 日与管辖异议窗口倒计时用):',
       validate: (s: string) => !s || parseLooseDate(s) ? true : `无法解析日期: ${s} (例: 2026-09-20)`,
+    },
+    {
+      type: 'input',
+      name: 'defendantFacts',
+      message: '被告方陈述 (选填, 您这边的版本; 生成答辩状会写入"答辩人的事实主张" — 现在没有可留空, 后补: dsh case set <id> defendantFacts "..." ):',
     },
   ]);
 
@@ -74,6 +82,7 @@ export async function caseNewCommand(id: string): Promise<void> {
     evidence: [],
     court: a.court || undefined,
     servedAt: a.servedAt?.trim() || undefined,
+    defendantFacts: a.defendantFacts?.trim() || undefined,
   };
 
   const c = createCase(config, input);
@@ -82,14 +91,16 @@ export async function caseNewCommand(id: string): Promise<void> {
   out.dim('提示: 接下来可以:');
   out.dim(`  - dsh analyze-complaint 起诉状.pdf --case ${c.id}   拆解起诉状, 自动回填原告/诉请/事实/法院`);
   out.dim(`  - dsh generate defense --case ${c.id} --draft       生成答辩状`);
-  out.dim('  - 手动编辑 case.json 补充证据清单');
+  out.dim(`  - dsh case set ${c.id} defendantFacts "..."         后补被告方陈述 (答辩状"答辩人的事实主张"节)`);
+  out.dim(`  - dsh case set ${c.id} evidence <证据.json>         导入被告证据清单 (或手动编辑 case.json)`);
 }
 
 /**
  * dsh case set <id> <key> <value> — 白名单改被告侧手填字段。
- * 原告/诉请/事实不走这里 (应由 analyze-complaint --case 拆解回填, 避免重复录入)。
+ * 原告/诉请/原告主张不走这里 (应由 analyze-complaint --case 拆解回填, 避免重复录入)。
+ *   servedAt = 日期; defendantFacts = 被告方陈述文本; evidence = 证据 JSON 文件路径 (整组替换)
  */
-const CASE_SET_KEYS = ['servedAt'] as const;
+const CASE_SET_KEYS = ['servedAt', 'defendantFacts', 'evidence'] as const;
 
 export function caseSetCommand(id: string, key: string, value: string): void {
   const config = loadConfig();
@@ -98,15 +109,35 @@ export function caseSetCommand(id: string, key: string, value: string): void {
   if (!(CASE_SET_KEYS as readonly string[]).includes(key)) {
     die(
       `不支持修改字段: ${key}\n` +
-        `  当前仅支持: ${CASE_SET_KEYS.join(', ')} (原告/诉请/事实请用 dsh analyze-complaint <起诉状> --case ${id} 自动回填)`,
+        `  当前仅支持: ${CASE_SET_KEYS.join(', ')} (原告/诉请/原告主张请用 dsh analyze-complaint <起诉状> --case ${id} 自动回填)`,
     );
   }
+  let shown = '';
   if (key === 'servedAt') {
     if (!parseLooseDate(value)) die(`无法解析日期: ${value} (例: 2026-09-20)`);
     c.servedAt = value.trim();
+    shown = c.servedAt;
+  } else if (key === 'defendantFacts') {
+    const text = value.trim();
+    c.defendantFacts = text.length > 0 ? text : undefined;
+    shown = text.length > 0 ? `${text.length} 字` : '(已清空)';
+  } else {
+    if (!existsSync(value)) die(`证据文件不存在: ${value}`);
+    let parsed: unknown;
+    try {
+      parsed = readJsonFile<unknown>(value);
+    } catch (e) {
+      die(`证据文件 JSON 解析失败: ${(e as Error).message}`);
+    }
+    try {
+      c.evidence = normalizeEvidenceArray(parsed);
+    } catch (e) {
+      die(`证据文件校验失败: ${(e as Error).message}`);
+    }
+    shown = `${c.evidence.length} 条 (整组替换)`;
   }
   updateCase(config, c);
-  out.success(`${id}: ${key} = ${c.servedAt}`);
+  out.success(`${id}: ${key} = ${shown}`);
   const dl = defenseDeadline(c.servedAt);
   if (dl) {
     out.info(`答辩期: 收到后第 ${dl.daysSince} 天, 剩 ${dl.remaining > 0 ? `${dl.remaining} 日` : '已届满'}`);
@@ -146,6 +177,10 @@ export function caseShowCommand(id: string, flags: { json?: boolean } = {}): voi
   out.info(`案件 ${c.id}: ${c.title}  (${c.cause})  /  阶段: ${stage.label}`);
   out.log(`  当事人: 原告 ${c.plaintiff.name} vs 被告 ${c.defendant.name}`);
   out.log(`  法院: ${c.court ?? '(未识别)'}  /  诉请: ${c.claims.length} 条  /  代理律师: ${c.lawyer?.name ?? '(未填)'}`);
+  const df = c.defendantFacts?.trim();
+  out.log(
+    `  被告侧: 陈述 ${df ? `✓ ${df.length} 字` : `⚠️ 未填 (后补: dsh case set ${id} defendantFacts "...")`}  /  证据 ${c.evidence.length > 0 ? `✓ ${c.evidence.length} 条` : `0 条 (导入: dsh case set ${id} evidence <证据.json>)`}`,
+  );
   const dl = defenseDeadline(c.servedAt);
   if (dl) {
     if (dl.remaining < 0) {

@@ -58,8 +58,10 @@ export interface Case {
   defendant: Party;
   /** 律师 (选填) */
   lawyer?: Party;
-  /** 事实摘要 — 侵权发生的时间/地点/方式/内容/后果 */
+  /** 事实摘要 — 侵权发生的时间/地点/方式/内容/后果 (拆解起诉状时自动回填, 属**原告主张**口径) */
   facts: string;
+  /** 被告方陈述 (被告自己的事实版本, 选填) — generate defense 写入"答辩人的事实主张"节; 空则保留 [待补充] 占位 */
+  defendantFacts?: string;
   /** 诉讼请求列表 */
   claims: Claim[];
   /** 证据清单 */

@@ -5,7 +5,7 @@
  */
 import { readdirSync, existsSync, readFileSync, writeFileSync, mkdirSync, statSync } from 'node:fs';
 import { join } from 'node:path';
-import type { Case, CaseInput } from './types.js';
+import type { Case, CaseInput, Evidence } from './types.js';
 import type { ComplaintAnalysis } from '../analyzer/complaint-types.js';
 import { getCasesDir, type DshConfig } from '../config/config.js';
 
@@ -123,4 +123,41 @@ export function mergeAnalysisIntoCase(c: Case, a: ComplaintAnalysis): Case {
     claims: a.claims.length > 0 ? a.claims.map((cl) => ({ content: cl.content, amount: cl.amount })) : c.claims,
     court: isBlank(c.court) ? a.courtOfFiling : c.court,
   };
+}
+
+const EVIDENCE_KINDS = ['书证', '物证', '视听资料', '电子数据', '证人证言', '鉴定意见', '勘验笔录'] as const;
+
+/**
+ * 校验并归一化证据导入数据 (case set evidence <file>) — 非法即抛错 (调用方 die), 绝不静默丢条目
+ */
+export function normalizeEvidenceArray(input: unknown): Evidence[] {
+  const arr = Array.isArray(input)
+    ? input
+    : input !== null && typeof input === 'object' && Array.isArray((input as { evidence?: unknown }).evidence)
+      ? ((input as { evidence: unknown[] }).evidence)
+      : null;
+  if (!arr) throw new Error('证据文件需为数组 [...] 或 {evidence: [...]}');
+  if (arr.length === 0) throw new Error('证据文件为空');
+  return arr.map((item, i) => {
+    if (item === null || typeof item !== 'object') throw new Error(`证据 ${i + 1}: 需为对象`);
+    const o = item as Record<string, unknown>;
+    const name = typeof o.name === 'string' ? o.name.trim() : '';
+    if (!name) throw new Error(`证据 ${i + 1}: 缺少 name`);
+    const kind = String(o.kind ?? '书证');
+    if (!(EVIDENCE_KINDS as readonly string[]).includes(kind)) {
+      throw new Error(`证据 "${name}": 种类 "${kind}" 非法 (可选: ${EVIDENCE_KINDS.join('/')})`);
+    }
+    const purpose = typeof o.purpose === 'string' ? o.purpose.trim() : '';
+    if (!purpose) throw new Error(`证据 "${name}": 缺少 purpose (证明目的)`);
+    const str = (v: unknown): string | undefined => (typeof v === 'string' && v.trim() ? v.trim() : undefined);
+    return {
+      index: i + 1,
+      name,
+      kind: kind as Evidence['kind'],
+      purpose,
+      source: str(o.source),
+      acquiredAt: str(o.acquiredAt),
+      filePath: str(o.filePath),
+    };
+  });
 }

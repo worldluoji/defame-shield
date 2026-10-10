@@ -186,6 +186,52 @@ describe('generateDefense (draft 模式)', () => {
     if (!r.ok) throw new Error('gen fail');
     expect(r.content).toContain('待补充');
   });
+
+  it('被告陈述 (defendantFacts) 写入"答辩人的事实主张"节', async () => {
+    const a = await analyzeComplaint(SAMPLE_COMPLAINT, { draft: true });
+    if (!a.ok) throw new Error('analyze fail');
+    const r = await generateDefense({
+      analysis: a.analysis,
+      case: { ...SAMPLE_CASE, defendantFacts: '涉案内容为正常消费评价, 与原告无恩怨。' },
+      draft: true,
+    });
+    if (!r.ok) throw new Error('gen fail');
+    expect(r.content).toContain('涉案内容为正常消费评价, 与原告无恩怨。');
+    expect(r.content).not.toContain('[待补充: 答辩人需要在此节陈述');
+  });
+
+  it('被告陈述为空 → 保留 [待补充] 占位且不虚构', async () => {
+    const a = await analyzeComplaint(SAMPLE_COMPLAINT, { draft: true });
+    if (!a.ok) throw new Error('analyze fail');
+    const r = await generateDefense({
+      analysis: a.analysis,
+      case: { ...SAMPLE_CASE, defendantFacts: '   ' },
+      draft: true,
+    });
+    if (!r.ok) throw new Error('gen fail');
+    expect(r.content).toContain('[待补充: 答辩人需要在此节陈述');
+    expect(r.content).toContain('dsh case set def-001 defendantFacts');
+  });
+
+  it('case.evidence 合入答辩证据指引"答辩人已掌握证据"', async () => {
+    const a = await analyzeComplaint(SAMPLE_COMPLAINT, { draft: true });
+    if (!a.ok) throw new Error('analyze fail');
+    const r = await generateDefense({
+      analysis: a.analysis,
+      case: {
+        ...SAMPLE_CASE,
+        evidence: [
+          { index: 1, name: '订单截图', kind: '电子数据', purpose: '证明评价基于真实消费', source: '平台后台' },
+        ],
+      },
+      draft: true,
+    });
+    if (!r.ok) throw new Error('gen fail');
+    expect(r.content).toContain('答辩人已掌握证据');
+    expect(r.content).toContain('订单截图');
+    expect(r.content).toContain('证明评价基于真实消费');
+    expect(r.content).toContain('平台后台');
+  });
 });
 
 describe('generateDefense (AI 模式失败回退)', () => {

@@ -1,8 +1,8 @@
 /**
- * mergeAnalysisIntoCase — 起诉状拆解回填案件 (纯函数) 单元测试
+ * mergeAnalysisIntoCase + normalizeEvidenceArray — 案件层纯函数单元测试
  */
 import { describe, it, expect } from 'vitest';
-import { mergeAnalysisIntoCase } from '../src/case/case';
+import { mergeAnalysisIntoCase, normalizeEvidenceArray } from '../src/case/case';
 import type { Case } from '../src/case/types';
 import type { ComplaintAnalysis } from '../src/analyzer/complaint-types';
 
@@ -98,5 +98,38 @@ describe('mergeAnalysisIntoCase', () => {
       },
     }));
     expect(m.lawyer?.name).toBe('某律师');
+  });
+
+  it('mergeAnalysisIntoCase 从不触碰 defendantFacts / evidence', () => {
+    const base = mkCase({ defendantFacts: '被告自己的版本', evidence: [{ index: 1, name: '截图', kind: '书证', purpose: '证明真实消费' }] });
+    const m = mergeAnalysisIntoCase(base, mkAnalysis());
+    expect(m.defendantFacts).toBe('被告自己的版本');
+    expect(m.evidence).toHaveLength(1);
+  });
+});
+
+describe('normalizeEvidenceArray', () => {
+  it('数组形式: 归一化并自动编号', () => {
+    const r = normalizeEvidenceArray([
+      { name: '订单截图', kind: '电子数据', purpose: '证明真实消费', source: '平台后台' },
+      { name: '证人证言' , purpose: '证明无恩怨' },
+    ]);
+    expect(r).toHaveLength(2);
+    expect(r[0]).toEqual({ index: 1, name: '订单截图', kind: '电子数据', purpose: '证明真实消费', source: '平台后台', acquiredAt: undefined, filePath: undefined });
+    expect(r[1]!.kind).toBe('书证');
+    expect(r[1]!.index).toBe(2);
+  });
+
+  it('{evidence: [...]} 对象形式同样接受', () => {
+    const r = normalizeEvidenceArray({ evidence: [{ name: 'a', purpose: 'p' }] });
+    expect(r).toHaveLength(1);
+  });
+
+  it('非法输入抛错, 绝不静默丢条目', () => {
+    expect(() => normalizeEvidenceArray('not json')).toThrow(/数组/);
+    expect(() => normalizeEvidenceArray([])).toThrow(/为空/);
+    expect(() => normalizeEvidenceArray([{ purpose: '没有 name' }])).toThrow(/缺少 name/);
+    expect(() => normalizeEvidenceArray([{ name: 'x' }])).toThrow(/缺少 purpose/);
+    expect(() => normalizeEvidenceArray([{ name: 'x', purpose: 'p', kind: '法宝' }])).toThrow(/种类/);
   });
 });

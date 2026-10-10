@@ -98,7 +98,7 @@ DEEPSEEK_API_KEY=sk-你的key
 完整 7 步,每步产物是下一步的输入:
 
 ```bash
-# ① 建案 — 只问被告侧信息 (当事人必填; 地址/律师等选填)。
+# ① 建案 — 只问被告侧信息 (当事人必填; 地址/律师/被告方陈述选填)。
 #    原告/诉请/事实/法院不用手填, ② 拆解起诉状后自动回填。
 #    记得填"收到起诉状副本日期" — 答辩期 15 日与管辖异议窗口靠它倒计时 (漏了可 dsh case set 补)。
 dsh case new def-001
@@ -117,8 +117,11 @@ dsh generate defense --case def-001 --draft
 dsh self-check --case def-001
 
 # ⑤ 回填事实 + 修补:
-#    事实缺口补进拆解 JSON (唯一事实源, 重生成不丢, 留 _fillLog 审计):
-dsh fill data/cases/def-001/complaint-analysis.json --set "facts.time=2026-03-12" --allow-new
+#    原告主张口径的事实缺口 → 补进拆解 JSON (唯一事实源, 重生成不丢, 留 _fillLog 审计):
+dsh fill --case def-001 --set "facts.time=2026-03-12" --allow-new
+#    被告自己的版本 (陈述/证据) → 写 case.json, 生成答辩状时渲染进"答辩人的事实主张"与证据指引:
+dsh case set def-001 defendantFacts "涉案内容为真实消费评价, 与原告无恩怨"
+dsh case set def-001 evidence 证据.json        # 数组或 {evidence:[...]} 格式
 #    然后重跑 ③, 再注入修补 (程序性反点仅在拆解能确证时才注入, 宁缺毋滥;
 #    目标 patched 已存在时会拒绝覆盖, 确认后加 --yes; 人工改稿用 fill-defense 交互式填充)
 dsh apply-fixes --case def-001
@@ -137,7 +140,7 @@ dsh export-pdf data/cases/def-001/outputs/defense-patched.md
 - ✅ 总体答辩策略 (按杀伤力排序的 top-3 反点)
 - ✅ 逐条诉请反驳 (每条匹配最适反点 + 法律依据)
 - ✅ 类案参考 (裁判要点式, 不编案号)
-- ✅ 答辩证据指引 (基于反点, 提示需补充的证据)
+- ✅ 答辩证据指引 (已掌握证据清单 + 基于反点的补证建议)
 - ✅ 待补充标记 (`[待补充: ...]`, 提示律师补案件特有事实 — 工具绝不虚构)
 
 端到端细节见 [docs/答辩工作流.md](docs/答辩工作流.md);现成样本 `data/cases/def-sample-001/` 可对照。
@@ -189,6 +192,8 @@ dsh init                                            初始化项目 (dsh.config.
 dsh config show / set <key> <value>                 查看/修改配置 (author/llmEnabled/casesDir/outputsDir/llmCloudConsent)
 dsh case new <id>                                   建案 (只填被告侧; 原告侧见场景 B 注意事项)
 dsh case set <id> servedAt <日期>                    记录收到起诉状副本日 → 答辩期 15 日/管辖异议窗口倒计时
+dsh case set <id> defendantFacts <文本>              被告方陈述 (自己的事实版本) → 答辩状"答辩人的事实主张"节
+dsh case set <id> evidence <证据.json>               导入被告证据清单 (整组替换) → 答辩状"已掌握证据"
 dsh case list / show <id> [--json]                  案件列表/详情 (show 显示期限倒计时+流水线状态+推荐下一步; --json 输出 case.json 原文)
 dsh convert <file> [--out|--native|--print-meta|--check]  PDF/Word → markdown (纯 Node); PPT/Excel/HTML 需 MarkItDown
 dsh analyze-complaint <起诉状> [选项]               拆解 → complaint-analysis.json
@@ -206,8 +211,8 @@ dsh apply-fixes [defense] [选项]                    修补建议自动注入 �
   --case <id>            自动定位 (同上)            --analysis <json>  显式覆盖
   --critical-only        仅注入 critical            --vulnerabilities <json>  复用已有清单
   --yes                  目标 patched 已存在时确认覆盖 (默认拒绝并给分流指引)
-dsh fill <analysis.json> [选项]                     非交互回填拆解 JSON 字段 (补事实的唯一通道)
-  --set "路径=值" (可重复)  --from <json>  --allow-new  --out <path>
+dsh fill [analysis.json] [选项]                     非交互回填拆解 JSON (补**原告主张**事实缺口的唯一通道; 被告版本走 case set)
+  --case <id> 自动定位拆解 JSON  --set "路径=值" (可重复)  --from <json>  --allow-new  --out <path>
 dsh fill-defense <file> [--out]                     交互式填充 [待补充] 占位符 (文书层, 人工润色)
 dsh simulate [defense] [选项]                       攻防推演 → 风险走向 (rule 定性档 / ai 概率估算, 均非预测)
   --case <id> 自动定位当前稿+拆解 JSON  --analysis <json>  显式覆盖
@@ -215,7 +220,7 @@ dsh simulate [defense] [选项]                       攻防推演 → 风险走
 dsh export-pdf <file> [--out|--case-number|--title] markdown → PDF (法院文书排版)
 ```
 
-> `--case <id>` 会让 self-check / apply-fixes / simulate 自动定位 `outputs/defense.md` 当前稿与 `complaint-analysis.json`; 位置参数 `<defense>` 与 `--analysis` 仅在跨案件引用或用归档旧版时需要。
+> `--case <id>` 会让 self-check / apply-fixes / simulate 自动定位 `outputs/defense.md` 当前稿与 `complaint-analysis.json` (fill 只定位拆解 JSON); 位置参数 `<defense>` / `<analysis.json>` 与 `--analysis` 仅在跨案件引用或用归档旧版时需要。
 
 ## Agent 模式 (不想记命令)
 
