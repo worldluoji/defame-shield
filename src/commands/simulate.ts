@@ -1,20 +1,23 @@
 /**
  * dsh simulate — 攻防推演
  *
- * dsh simulate <defense.md> --analysis <json> --case <id> [--rounds 3] [--mode rule|ai]
+ * dsh simulate [defense.md] [--analysis <json> | --case <id>] [--rounds 3] [--mode rule|ai]
  */
-import { readFileSync, existsSync } from 'node:fs';
-import { simulateBattle, type SimulationResult } from '../rebuttal/simulator.js';
+import { readFileSync } from 'node:fs';
+import { simulateBattle, riskBand, type SimulationResult } from '../rebuttal/simulator.js';
 import { checkAllStatutes } from '../data/statutes.js';
 import { loadConfig } from '../config/config.js';
 import { loadCase } from '../case/case.js';
+import { resolveAnalysisPath, resolveDefensePath } from '../case/pipeline.js';
+import { confirmCloudDisclosure } from '../utils/cloud-consent.js';
 import { out, die } from '../utils/console.js';
 import { readJsonFile, writeJsonFile } from '../utils/json.js';
 import type { ComplaintAnalysis } from '../analyzer/complaint-types.js';
 import type { Case } from '../case/types.js';
 
 export interface SimulateFlags {
-  analysis: string;
+  /** 拆解结果 JSON 路径 (省略时从 --case 定位) */
+  analysis?: string;
   case?: string;
   /** commander 经 parseInt 后为 number */
   rounds?: number;
@@ -23,9 +26,9 @@ export interface SimulateFlags {
   out?: string;
 }
 
-export async function simulateCommand(defensePath: string, flags: SimulateFlags): Promise<void> {
-  if (!existsSync(defensePath)) die(`答辩状文件不存在: ${defensePath}`);
-  if (!existsSync(flags.analysis)) die(`拆解结果文件不存在: ${flags.analysis}`);
+export async function simulateCommand(defensePath: string | undefined, flags: SimulateFlags): Promise<void> {
+  const resolvedDefense = resolveDefensePath(defensePath, flags.case);
+  const resolvedAnalysis = resolveAnalysisPath(flags.analysis, flags.case);
   if (flags.rounds !== undefined && (!Number.isInteger(flags.rounds) || flags.rounds < 1)) {
     die(`--rounds 必须是 ≥1 的整数, 收到: ${flags.rounds}`);
   }
@@ -33,8 +36,8 @@ export async function simulateCommand(defensePath: string, flags: SimulateFlags)
     die(`非法 --mode: ${flags.mode} (可选: rule | ai)`);
   }
 
-  const defense = readFileSync(defensePath, 'utf-8');
-  const analysis = readJsonFile<ComplaintAnalysis>(flags.analysis);
+  const defense = readFileSync(resolvedDefense, 'utf-8');
+  const analysis = readJsonFile<ComplaintAnalysis>(resolvedAnalysis);
 
   // 案件信息
   const config = loadConfig();
@@ -64,14 +67,19 @@ export async function simulateCommand(defensePath: string, flags: SimulateFlags)
     };
   }
 
-  out.info(`推演: ${c.title}  /  轮数: ${flags.rounds ?? 3}  /  模式: ${flags.mode ?? 'rule'}`);
+  let mode: 'rule' | 'ai' = flags.mode ?? 'rule';
+  if (mode === 'ai' && !(await confirmCloudDisclosure(flags.provider))) {
+    mode = 'rule';
+  }
+
+  out.info(`推演: ${c.title}  /  轮数: ${flags.rounds ?? 3}  /  模式: ${mode}`);
 
   const result = await simulateBattle({
     case: c,
     analysis,
     defense,
     rounds: flags.rounds ?? 3,
-    mode: flags.mode,
+    mode,
     provider: flags.provider as 'deepseek' | 'minimax' | undefined,
   });
 
@@ -97,13 +105,23 @@ export async function simulateCommand(defensePath: string, flags: SimulateFlags)
 }
 
 function printBattle(r: SimulationResult): void {
-  out.info(`被告胜诉轨迹: ${r.trajectory.map((n) => `${n}%`).join(' → ')}`);
+  // rule 模式: 内部 0-100 启发式评分不配精确百分比 — 展示为定性风险档 (非预测)
+  if (r.mode === 'rule') {
+    // Round 0 为未答辩基线, 走势自 Round 1 起算
+    out.info(`风险走势 (自被告答辩起): ${r.trajectory.slice(1).map((n) => riskBand(n)).join(' → ')}`);
+  } else {
+    out.info(`被告胜诉轨迹: ${r.trajectory.map((n) => `${n}%`).join(' → ')}`);
+  }
   out.info(`趋势: ${trendLabel(r.trend)}  /  关键转折: ${r.pivotRound !== undefined ? `Round ${r.pivotRound}` : '无'}`);
 
   out.log('');
   for (const round of r.rounds) {
     const sideIcon = round.side === '原告' ? '🔴' : '🔵';
-    out.log(`--- Round ${round.index} | ${sideIcon} ${round.side} | ${round.type} | 被告胜诉 ${round.defendantWinProb}% ---`);
+    const probLabel =
+      r.mode === 'rule'
+        ? `态势: ${round.index === 0 ? '基线 (未答辩)' : riskBand(round.defendantWinProb)}`
+        : `被告胜诉 ${round.defendantWinProb}%`;
+    out.log(`--- Round ${round.index} | ${sideIcon} ${round.side} | ${round.type} | ${probLabel} ---`);
     for (const kp of round.keyPoints) {
       out.log(`  • ${kp}`);
     }
@@ -124,7 +142,7 @@ function printBattle(r: SimulationResult): void {
 }
 
 function trendLabel(t: 'improving' | 'stable' | 'worsening'): string {
-  if (t === 'improving') return '📈 改善 (胜诉概率↑)';
-  if (t === 'worsening') return '📉 恶化 (胜诉概率↓)';
+  if (t === 'improving') return '📈 改善 (对被告更有利)';
+  if (t === 'worsening') return '📉 恶化 (对被告更不利)';
   return '➡️ 稳定';
 }

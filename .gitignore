@@ -20,6 +20,7 @@ dist/
 
 # user data
 data/cases/*/outputs/*.md
+data/cases/*/outputs/history/
 !data/cases/sample-defamation/outputs/.gitkeep
 
 # os

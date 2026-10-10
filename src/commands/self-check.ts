@@ -1,18 +1,22 @@
 /**
  * dsh self-check — 抗辩自检
  *
- * dsh self-check <defense.md> --analysis <json> [--mode rule|ai|hybrid]
+ * dsh self-check [defense.md] [--analysis <json> | --case <id>] [--mode rule|ai|hybrid]
  */
-import { readFileSync, existsSync } from 'node:fs';
+import { readFileSync } from 'node:fs';
 import { basename } from 'node:path';
 import { selfCheckDefense, type CheckMode, type SelfCheckResult } from '../rebuttal/self-check.js';
 import { out, die } from '../utils/console.js';
 import { readJsonFile, writeJsonFile } from '../utils/json.js';
+import { resolveAnalysisPath, resolveDefensePath } from '../case/pipeline.js';
+import { confirmCloudDisclosure } from '../utils/cloud-consent.js';
 import type { ComplaintAnalysis } from '../analyzer/complaint-types.js';
 
 export interface SelfCheckFlags {
-  /** 拆解结果 JSON 路径 */
-  analysis: string;
+  /** 拆解结果 JSON 路径 (省略时从 --case 定位) */
+  analysis?: string;
+  /** 案件 ID: 自动定位当前稿答辩状与拆解 JSON */
+  case?: string;
   /** 模式 */
   mode?: CheckMode;
   /** provider */
@@ -23,22 +27,27 @@ export interface SelfCheckFlags {
   severeOnly?: boolean;
 }
 
-export async function selfCheckCommand(defensePath: string, flags: SelfCheckFlags): Promise<void> {
-  if (!existsSync(defensePath)) die(`答辩状文件不存在: ${defensePath}`);
-  if (!existsSync(flags.analysis)) die(`拆解结果文件不存在: ${flags.analysis}`);
+export async function selfCheckCommand(defensePath: string | undefined, flags: SelfCheckFlags): Promise<void> {
+  const resolvedDefense = resolveDefensePath(defensePath, flags.case);
+  const resolvedAnalysis = resolveAnalysisPath(flags.analysis, flags.case);
   if (flags.mode && !['rule', 'ai', 'hybrid'].includes(flags.mode)) {
     die(`非法 --mode: ${flags.mode} (可选: rule | ai | hybrid)`);
   }
 
-  const defense = readFileSync(defensePath, 'utf-8');
-  const analysis = readJsonFile<ComplaintAnalysis>(flags.analysis);
+  const defense = readFileSync(resolvedDefense, 'utf-8');
+  const analysis = readJsonFile<ComplaintAnalysis>(resolvedAnalysis);
 
-  out.info(`自检答辩状: ${basename(defensePath)}  /  基于拆解: ${basename(flags.analysis)}  /  模式: ${flags.mode ?? 'rule'}`);
+  let mode: CheckMode = flags.mode ?? 'rule';
+  if ((mode === 'ai' || mode === 'hybrid') && !(await confirmCloudDisclosure(flags.provider))) {
+    mode = 'rule';
+  }
+
+  out.info(`自检答辩状: ${basename(resolvedDefense)}  /  基于拆解: ${basename(resolvedAnalysis)}  /  模式: ${mode}`);
 
   const result = await selfCheckDefense({
     defense,
     analysis,
-    mode: flags.mode,
+    mode,
     provider: flags.provider as 'deepseek' | 'minimax' | undefined,
   });
 

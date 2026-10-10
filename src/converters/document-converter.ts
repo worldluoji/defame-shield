@@ -17,7 +17,22 @@ import { homedir } from 'node:os';
 import { createHash } from 'node:crypto';
 import { detectFormat, isPassthrough, type SupportedFormat } from './format-detector.js';
 import { convertWithMarkItDown, isMarkItDownInstalled, MARKITDOWN_INSTALL_HINT } from './markitdown-adapter.js';
-import { convertDocxNative, convertPdfNative, isNativeSupported } from './native-converters.js';
+import { convertDocxNative, convertPdfNative, isNativeSupported, SCANNED_PDF_GUIDANCE } from './native-converters.js';
+
+/**
+ * 可见文字强度: 去掉空白/图片链接语法/排版符号后剩余字符数。
+ * 接近 0 = 扫描版或空壳内容, 不应静默通过 (起诉状不可能是两三行)。
+ */
+export function visibleTextCount(md: string): number {
+  return md
+    .replace(/!\[[^\]]*\]\([^)]*\)/g, '')
+    .replace(/\[[^\]]*\]\([^)]*\)/g, '')
+    .replace(/[#>*|_\-`\s]/g, '')
+    .length;
+}
+
+/** 低于此字数视为"疑似扫描件/空壳", 转换成功但给出警告 */
+export const LOW_TEXT_WARN_THRESHOLD = 30;
 
 export type ConverterKind = 'passthrough' | 'markitdown' | 'cache' | 'native-docx' | 'native-pdf';
 
@@ -146,6 +161,13 @@ export class DocumentConverter {
     if (deps.markitdownInstalled) {
       const result = await convertWithMarkItDown(filePath, { timeoutMs: 60_000 });
       if (result.ok) {
+        // markitdown "成功"但只剩图片引用 = 扫描版, 报错而非静默产出空壳 md
+        if (visibleTextCount(result.markdown) === 0) {
+          return {
+            ok: false,
+            error: { error: SCANNED_PDF_GUIDANCE, code: 'conversion_failed' },
+          };
+        }
         if (useCache) {
           this.writeCache(filePath, stat, result.markdown);
         }
@@ -204,7 +226,8 @@ export class DocumentConverter {
         error: {
           error: r.error,
           code: 'conversion_failed',
-          installHint: MARKITDOWN_INSTALL_HINT,
+          // 提取为空 (扫描版) 时装 markitdown 也没用, 不给误导性安装提示
+          installHint: r.code === 'no_output' ? undefined : MARKITDOWN_INSTALL_HINT,
         },
       };
     }

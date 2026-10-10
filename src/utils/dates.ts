@@ -45,3 +45,37 @@ function earliestMs(t: LooseDate): number {
 export function elapsedYears(from: LooseDate, to: LooseDate): number {
   return Math.max(0, (earliestMs(to) - latestMs(from)) / MS_PER_YEAR);
 }
+
+/**
+ * 从某天到今日的整天数 (日级精度; 解析不出/未来日期返回 null)。
+ * 期限倒计时需要可靠日期, 所以 "2026 年 9 月" 这种月级精度一律不采信。
+ */
+export function daysSince(from: string, now: Date = new Date()): number | null {
+  const t = parseLooseDate(from);
+  if (!t || !t.m || !t.d) return null;
+  const fromMs = Date.UTC(t.y, t.m - 1, t.d);
+  const todayMs = Date.UTC(now.getFullYear(), now.getMonth(), now.getDate());
+  const days = Math.round((todayMs - fromMs) / 86_400_000);
+  return days >= 0 ? days : null;
+}
+
+/** 民事答辩期: 收到起诉状副本之日起 15 日 (民诉法 128 条); 管辖异议须同期提出 */
+export const DEFENSE_PERIOD_DAYS = 15;
+
+export interface DefenseDeadline {
+  servedAt: string;
+  daysSince: number;
+  /** 答辩期剩余天数 (可为负 = 已届满) */
+  remaining: number;
+  /** 剩余 ≤5 日 (含已逾期) — 需醒目提醒 */
+  urgent: boolean;
+}
+
+/** 依据送达日期计算答辩期窗口; servedAt 缺失或不可解析返回 null */
+export function defenseDeadline(servedAt: string | undefined, now: Date = new Date()): DefenseDeadline | null {
+  if (!servedAt) return null;
+  const d = daysSince(servedAt, now);
+  if (d === null) return null;
+  const remaining = DEFENSE_PERIOD_DAYS - d;
+  return { servedAt, daysSince: d, remaining, urgent: remaining <= 5 };
+}

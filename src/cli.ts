@@ -19,7 +19,7 @@ import { Command } from 'commander';
 import { loadEnvFile } from './config/env.js';
 import { initCommand } from './commands/init.js';
 import { configShowCommand, configSetCommand } from './commands/config.js';
-import { caseNewCommand, caseListCommand, caseShowCommand } from './commands/case.js';
+import { caseNewCommand, caseListCommand, caseShowCommand, caseSetCommand } from './commands/case.js';
 import { generateCommand } from './commands/generate.js';
 import { analyzeComplaintCommand } from './commands/analyze.js';
 import { selfCheckCommand } from './commands/self-check.js';
@@ -56,11 +56,16 @@ caseCmd
   .command('new <id>')
   .description('创建案件 (只填被告侧信息; 原告/诉请/事实由 analyze-complaint --case 拆解起诉状自动回填)')
   .action(caseNewCommand);
-caseCmd.command('list').description('列出所有案件').action(caseListCommand);
+caseCmd.command('list').description('列出所有案件 (含流水线阶段状态)').action(caseListCommand);
 caseCmd
   .command('show <id>')
-  .description('显示案件详情 (case.json)')
-  .action((id: string) => caseShowCommand(id));
+  .description('显示案件详情: 流水线状态 + 期限倒计时 + 残留占位符 + 推荐下一步 (--json 输出原始 case.json)')
+  .option('--json', '输出 case.json 原文 (供脚本/agent 使用)', false)
+  .action((id: string, flags: { json?: boolean }) => caseShowCommand(id, flags));
+caseCmd
+  .command('set <id> <key> <value>')
+  .description('修改被告侧字段 (当前仅 servedAt=收到起诉状副本日期, 用于答辩期倒计时; 原告/诉请/事实由拆解回填,不走此命令)')
+  .action((id: string, key: string, value: string) => caseSetCommand(id, key, value));
 
 const analyzeCmd = program.command('analyze-complaint <file>').description('拆解原告起诉状 → JSON');
 analyzeCmd
@@ -86,9 +91,10 @@ fillJsonCmd
   .option('--out <path>', '输出路径 (默认: 原地写回)')
   .action(fillAnalysisCommand);
 
-const applyCmd = program.command('apply-fixes <defense>').description('自检修补建议自动注入答辩状');
+const applyCmd = program.command('apply-fixes [defense]').description('自检修补建议自动注入答辩状 (--case 自动定位当前稿与拆解 JSON)');
 applyCmd
-  .requiredOption('--analysis <json>', '拆解结果 JSON 路径')
+  .option('--analysis <json>', '拆解结果 JSON 路径 (省略时从 --case 定位)')
+  .option('--case <id>', '案件 ID (自动定位 outputs 当前稿 + complaint-analysis.json)')
   .option('--out <path>', '输出路径 (默认: <原名>-patched.md; 目标已存在时需 --yes 确认覆盖)')
   .option('--yes', '目标 patched 文件已存在时确认覆盖', false)
   .option('--critical-only', '仅注入 critical 风险', false)
@@ -104,10 +110,10 @@ convertCmd
   .option('--check', '检查转换能力 (纯 Node 兜底 + markitdown)', false)
   .action(convertCommand);
 
-const simCmd = program.command('simulate <defense>').description('攻防推演 — 模拟原/被告多轮交锋, 评估胜诉概率轨迹');
+const simCmd = program.command('simulate [defense]').description('攻防推演 — 模拟原/被告多轮交锋, 评估风险走向 (--case 自动定位当前稿与拆解 JSON)');
 simCmd
-  .requiredOption('--analysis <json>', '拆解结果 JSON 路径')
-  .option('--case <id>', '本地案件 ID (提供更准确的被告信息)')
+  .option('--analysis <json>', '拆解结果 JSON 路径 (省略时从 --case 定位)')
+  .option('--case <id>', '本地案件 ID (自动定位当前稿 + 拆解 JSON, 提供更准确的被告信息)')
   .option('--rounds <n>', '推演轮数 (默认 3)', (v: string, _previous: number) => parseInt(v, 10), 3)
   .option('--mode <mode>', '模式: rule | ai (默认 rule)', 'rule')
   .option('--provider <provider>', 'LLM provider')
@@ -121,9 +127,10 @@ exportCmd
   .option('--title <title>', 'PDF 文档标题')
   .action(exportPdfCommand);
 
-const selfCheckCmd = program.command('self-check <defense>').description('抗辩自检 — 模拟原告律师找漏洞');
+const selfCheckCmd = program.command('self-check [defense]').description('抗辩自检 — 模拟原告律师找漏洞 (--case 自动定位当前稿与拆解 JSON)');
 selfCheckCmd
-  .requiredOption('--analysis <json>', '拆解结果 JSON 路径')
+  .option('--analysis <json>', '拆解结果 JSON 路径 (省略时从 --case 定位)')
+  .option('--case <id>', '案件 ID (自动定位 outputs 当前稿 + complaint-analysis.json)')
   .option('--mode <mode>', '模式: rule | ai | hybrid (默认 rule)', 'rule')
   .option('--provider <provider>', 'LLM provider (deepseek/minimax)')
   .option('--out <path>', '输出 JSON 路径')
@@ -137,7 +144,7 @@ genCmd
   .option('--provider <provider>', 'LLM provider (deepseek/minimax)')
   .option('--output <filename>', '自定义输出文件名')
   .option('--extra <text>', '给 LLM 的额外指令')
-  .option('--from-analysis <path>', '[仅 defense] 从拆解结果 JSON 生成答辩状')
+  .option('--from-analysis <path>', '[仅 defense] 从拆解结果 JSON 生成答辩状 (省略时 --case 自动使用案件内拆解结果)')
   .action(generateCommand);
 
 // pnpm run 会把 `--` 原样透传给脚本, commander 遇 `--` 停止解析选项 (--draft 等失效), 剥掉首个

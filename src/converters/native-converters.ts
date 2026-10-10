@@ -30,6 +30,14 @@ export interface NativeFailure {
 
 export type NativeResult = NativeSuccess | NativeFailure;
 
+/**
+ * 扫描版 PDF 的统一指引 — markitdown/纯 Node 都不含 OCR, 不要再误导用户"装 markitdown 就能 OCR"。
+ */
+export const SCANNED_PDF_GUIDANCE =
+  '未提取到任何文字 (大概率是扫描版/图片版 PDF)。本工具的转换器不含 OCR, 两条路:\n' +
+  '  ① 向法院/原告索取 Word 或文字版 PDF 重新送达或换源文件;\n' +
+  '  ② 用 OCR 提取后存成 complaint.md 直接走 analyze-complaint — 微信长按图片"提取文字"、QQ、Adobe Acrobat 均可, 法院送达照片也可先另存为图片再 OCR。';
+
 /** 纯 Node 路径支持的格式 (其余走 markitdown) */
 export function isNativeSupported(format: SupportedFormat): format is 'pdf' | 'docx' {
   return format === 'pdf' || format === 'docx';
@@ -69,7 +77,7 @@ export async function convertPdfNative(filePath: string): Promise<NativeResult> 
       return {
         ok: false,
         code: 'no_output',
-        error: 'PDF 无可提取文本 (可能是扫描版); 需 OCR 请安装 markitdown 或改用 Word 源文件',
+        error: SCANNED_PDF_GUIDANCE,
       };
     }
     return { ok: true, markdown: joined, pageCount: text.total, durationMs: Date.now() - start };

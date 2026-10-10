@@ -45,6 +45,15 @@ const STRATEGY_KEYPOINT: Record<StrategyId, string> = {
   'no-causation': '采用无因果关系抗辩',
 };
 
+/** 风险档位 (rule 模式展示层): 0-100 内部评分是启发式规则分, 精确百分比会制造"可预测判决"的错觉 */
+export type RiskBand = '有利' | '中性' | '不利';
+
+export function riskBand(score: number): RiskBand {
+  if (score >= 70) return '有利';
+  if (score >= 40) return '中性';
+  return '不利';
+}
+
 export interface Round {
   /** 轮次: 0=起诉, 1=答辩, 2=反驱, 3=再答辩... */
   index: number;
@@ -73,7 +82,7 @@ export interface SimulationResult {
   caseContext: { plaintiff: string; defendant: string; cause: string };
   /** 推演轮次 */
   rounds: Round[];
-  /** 风险轨迹 (每轮的被告胜诉概率) */
+  /** 风险轨迹 (每轮内部评分 0-100; rule 模式展示层转定性档位, 不输出精确百分比) */
   trajectory: number[];
   /** 趋势: improving (胜诉概率↑) / stable / worsening (↓) */
   trend: 'improving' | 'stable' | 'worsening';
@@ -162,7 +171,7 @@ export async function simulateBattle(opts: SimulateOptions): Promise<SimulationR
   const trend = computeTrend(scored);
   const pivotIdx = findPivot(scored);
   const pivotRound = pivotIdx === undefined ? undefined : pivotIdx + 1;
-  const overallAdvice = generateAdvice(allRounds, trend, pivotRound, opts);
+  const overallAdvice = generateAdvice(allRounds, trend, pivotRound, mode);
 
   return {
     ok: true,
@@ -298,7 +307,7 @@ function ruleBasedSimulate(
     index: roundIdx,
     side,
     type,
-    content: `[Rule 推演] ${side} 第 ${roundIdx} 轮: ${type}\n\n(基于前一轮: 被告胜诉概率 ${lastScore}%, 证据缺口: ${prev.evidenceGaps.length} 个)\n\n推演内容: ${keyPoints.join('; ')}`,
+    content: `[Rule 推演] ${side} 第 ${roundIdx} 轮: ${type}\n\n(基于前一轮: 被告风险档位 ${riskBand(lastScore)}, 证据缺口: ${prev.evidenceGaps.length} 个)\n\n推演内容: ${keyPoints.join('; ')}`,
     defendantWinProb: newScore,
     keyPoints,
     evidenceGaps,
@@ -403,21 +412,39 @@ function findPivot(traj: number[]): number | undefined {
   return maxDiff >= 15 ? pivot : undefined;
 }
 
-function generateAdvice(rounds: Round[], trend: 'improving' | 'stable' | 'worsening', pivot: number | undefined, _opts: SimulateOptions): string {
+function generateAdvice(rounds: Round[], trend: 'improving' | 'stable' | 'worsening', pivot: number | undefined, mode: 'rule' | 'ai' | 'hybrid'): string {
   const final = rounds[rounds.length - 1];
   if (!final) return '推演未完成';
 
   const lastScore = final.defendantWinProb;
   const tips: string[] = [];
 
-  if (lastScore >= 80) {
+  // 末轮 (如最后陈述) 常无新增缺口, "0 个证据缺口" 不如不提
+  const gapNote = final.evidenceGaps.length > 0 ? `, 重点关注 ${final.evidenceGaps.length} 个证据缺口` : '';
+
+  if (mode === 'rule') {
+    // 启发式评分只配定性结论 — 精确百分比是对"预测判决结果"的虚假承诺
+    const band = riskBand(lastScore);
+    if (band === '有利') {
+      tips.push('✅ 攻防态势对被告有利 — 准备充分, 维持当前策略并准备庭审');
+    } else if (band === '中性') {
+      tips.push(`🟡 攻防态势胶着 — 有改进空间${gapNote}`);
+    } else {
+      tips.push('🔴 攻防态势对被告不利 — 建议补强关键反点 + 补充证据, 或重新评估诉讼策略/考虑调解');
+    }
+    tips.push('ℹ️ rule 推演为规则启发式评估, 档位仅反映文书攻防质量, 非胜诉率预测');
+  } else if (lastScore >= 80) {
     tips.push(`✅ 被告胜诉概率高 (${lastScore}%), 准备充分, 建议维持现状并准备庭审`);
   } else if (lastScore >= 60) {
-    tips.push(`🟡 被告胜诉概率中等 (${lastScore}%), 有改进空间, 重点关注 ${final.evidenceGaps.length} 个证据缺口`);
+    tips.push(`🟡 被告胜诉概率中等 (${lastScore}%), 有改进空间${gapNote}`);
   } else if (lastScore >= 40) {
     tips.push(`🟠 被告胜诉概率偏低 (${lastScore}%), 建议补强关键反点 + 补充关键证据`);
   } else {
     tips.push(`🔴 被告胜诉概率低 (${lastScore}%), 强烈建议调解或重新评估诉讼策略`);
+  }
+
+  if (mode !== 'rule') {
+    tips.push('ℹ️ 上述概率为 AI 基于攻防要点的估算, 非对判决结果的预测');
   }
 
   if (trend === 'worsening') {

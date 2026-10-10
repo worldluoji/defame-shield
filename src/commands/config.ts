@@ -12,14 +12,14 @@ export function configShowCommand(): void {
 
 export function configSetCommand(key: string, value: string): void {
   const c = loadConfig();
-  const allowed = ['author', 'llmEnabled', 'casesDir', 'outputsDir'];
+  const allowed = ['author', 'llmEnabled', 'casesDir', 'outputsDir', 'llmCloudConsent'];
   if (!allowed.includes(key)) {
     out.error(`不支持的 key: ${key}`);
     out.dim(`支持的: ${allowed.join(', ')}`);
     process.exit(1);
   }
   let parsed: unknown = value;
-  if (key === 'llmEnabled') {
+  if (key === 'llmEnabled' || key === 'llmCloudConsent') {
     parsed = value === 'true' || value === '1';
   }
   (c as unknown as Record<string, unknown>)[key] = parsed;

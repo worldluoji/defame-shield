@@ -81,15 +81,26 @@ describe('markitdown 未安装', () => {
     expect(r.error.code).toBe('markitdown_not_installed');
   });
 
-  it('native 兜底也失败 → conversion_failed 且带安装提示', async () => {
+  it('native 兜底失败 (非空提取) → conversion_failed 且带安装提示', async () => {
     mocks.installed = false;
-    mocks.convertPdfNative.mockResolvedValue({ ok: false, code: 'no_output', error: 'PDF 无可提取文本' });
+    mocks.convertPdfNative.mockResolvedValue({ ok: false, code: 'parse_failed', error: 'PDF 解析失败' });
     const { path, conv } = makeFile('pdf', '%PDF-1.4 body');
     const r = await conv.convert(path);
     expect(r.ok).toBe(false);
     if (r.ok) return;
     expect(r.error.code).toBe('conversion_failed');
     expect(r.error.installHint).toContain('markitdown');
+  });
+
+  it('提取为空 (no_output/扫描版) → 不再给 markitdown 安装误导', async () => {
+    mocks.installed = false;
+    mocks.convertPdfNative.mockResolvedValue({ ok: false, code: 'no_output', error: '未提取到任何文字' });
+    const { path, conv } = makeFile('pdf', '%PDF-1.4 body');
+    const r = await conv.convert(path);
+    expect(r.ok).toBe(false);
+    if (r.ok) return;
+    expect(r.error.code).toBe('conversion_failed');
+    expect(r.error.installHint).toBeUndefined();
   });
 });
 
@@ -131,6 +142,21 @@ describe('markitdown 已安装', () => {
     expect(r2.ok).toBe(true);
     if (!r2.ok) return;
     expect(r2.result.metadata.converter).toBe('markitdown');
+  });
+
+  it('markitdown 返回空壳 (图片引用) → 报扫描版而非静默通过', async () => {
+    const { path, conv } = makeFile('pdf', '%PDF-1.4 body');
+    mocks.convertWithMarkItDown.mockResolvedValue({
+      ok: true,
+      markdown: '![page1](abc.png)\n\n![page2](def.png)',
+      durationMs: 1,
+    });
+    const r = await conv.convert(path);
+    expect(r.ok).toBe(false);
+    if (r.ok) return;
+    expect(r.error.code).toBe('conversion_failed');
+    expect(r.error.error).toContain('扫描版');
+    expect(r.error.installHint).toBeUndefined();
   });
 
   it('markitdown 失败 + pptx → conversion_failed (无兜底)', async () => {

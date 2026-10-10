@@ -6,7 +6,7 @@
  */
 import { existsSync, writeFileSync, mkdirSync } from 'node:fs';
 import { dirname, basename } from 'node:path';
-import { DocumentConverter } from '../converters/document-converter.js';
+import { DocumentConverter, visibleTextCount, LOW_TEXT_WARN_THRESHOLD } from '../converters/document-converter.js';
 import { out, die } from '../utils/console.js';
 
 export interface ConvertFlags {
@@ -61,6 +61,9 @@ export async function convertCommand(input: string | undefined, flags: ConvertFl
   out.success(`已写入: ${outPath}`);
   const conv = result.result.metadata.converter;
   out.info(`格式: ${result.result.metadata.format}  /  转换器: ${conv}  /  缓存: ${result.result.metadata.fromCache ? '命中' : 'miss'}`);
+  if (conv !== 'passthrough' && visibleTextCount(result.result.markdown) < LOW_TEXT_WARN_THRESHOLD) {
+    out.warn(`提取到的文字极少 (${visibleTextCount(result.result.markdown)} 字) — 疑似扫描版/图片版, 拆解结果必然失真; 按报错指引换源文件或先 OCR`);
+  }
   if ((conv === 'native-pdf' || conv === 'native-docx') && !flags.native) {
     out.info('当前为纯 Node 兜底结果; 如需更好结构 (表格/pptx/xlsx), 安装 markitdown: ./scripts/setup.sh');
   }

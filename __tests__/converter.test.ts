@@ -8,12 +8,24 @@ import { writeFileSync, mkdirSync, existsSync, readFileSync, readdirSync, unlink
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import { spawn } from 'node:child_process';
-import { DocumentConverter } from '../src/converters/document-converter';
+import { DocumentConverter, visibleTextCount } from '../src/converters/document-converter';
 import { detectByExt, detectByMagic, detectFormat, isPassthrough } from '../src/converters/format-detector';
 import { isMarkItDownInstalled, MARKITDOWN_INSTALL_HINT, convertWithMarkItDown } from '../src/converters/markitdown-adapter';
 
 const tmpDir = join(tmpdir(), `dsh-conv-test-${Date.now()}`);
 mkdirSync(tmpDir, { recursive: true });
+
+describe('visibleTextCount', () => {
+  it('纯图片/链接语法 → 0 (扫描版判据)', () => {
+    expect(visibleTextCount('![page](a.png)\n![p2](b.png)')).toBe(0);
+    expect(visibleTextCount('')).toBe(0);
+    expect(visibleTextCount('#   \n---\n')).toBe(0);
+  });
+
+  it('真实文字计数, 忽略排版符号', () => {
+    expect(visibleTextCount('# 起诉状\n原告王女士被告赵某')).toBe('起诉状原告王女士被告赵某'.length);
+  });
+});
 
 describe('format-detector (扩展名)', () => {
   it('常见格式识别', () => {

@@ -18,7 +18,6 @@
  *   - 每次回填在 JSON 顶层追加 _fillLog 审计记录 (path / previous / value / filledAt)
  */
 import { existsSync } from 'node:fs';
-import { basename } from 'node:path';
 import { readJsonFile, writeJsonFile } from '../utils/json.js';
 import { out, die } from '../utils/console.js';
 import type { ComplaintAnalysis, FillLogEntry } from '../analyzer/complaint-types.js';
@@ -252,5 +251,5 @@ export async function fillAnalysisCommand(analysisPath: string, flags: FillAnaly
   }
   out.info(`共回填 ${applied.length} 项 (_fillLog 审计记录累计 ${log.length} 条)`);
   out.dim(outPath === analysisPath ? `已原地写回: ${outPath}` : `已另存: ${outPath}`);
-  out.info(`下一步: dsh generate defense --case <id> --from-analysis ${basename(outPath)} — 重生成后对应 [待补充] 自然消失`);
+  out.info(`下一步: dsh generate defense --case <id> — 案件内拆解结果会被自动使用, 重生成后对应 [待补充] 自然消失`);
 }

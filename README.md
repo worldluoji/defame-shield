@@ -20,22 +20,22 @@ dsh 在案件目录 `data/cases/<id>/` 里流转 3 类文件。**搞清归属,�
 | 文件 | 谁的 | 产生方式 | 被谁消费 |
 |---|---|---|---|
 | `complaint.md` | **原告** (起诉状) | 律师誊抄, 或 `dsh convert` 从 PDF/Word 转换 | `analyze-complaint` |
-| `complaint-analysis.json` | 中性 — 原告主张的**结构化拆解** (主体/诉请/事实/证据 + 四要件评分) | `dsh analyze-complaint`; 事实缺口用 `dsh fill` 回填 (留 `_fillLog` 审计) | `generate defense --from-analysis`、`self-check --analysis`、`simulate --analysis`、`apply-fixes --analysis` |
-| `outputs/defense-*.md` | **被告** (答辩状) | `dsh generate defense` | 提交法院前的润色链: `self-check <defense>` → `apply-fixes <defense>` → `simulate <defense>` → `export-pdf` |
+| `complaint-analysis.json` | 中性 — 原告主张的**结构化拆解** (主体/诉请/事实/证据 + 四要件评分) | `dsh analyze-complaint`; 事实缺口用 `dsh fill` 回填 (留 `_fillLog` 审计) | `generate defense`、`self-check`、`simulate`、`apply-fixes` (给 `--case` 即自动使用, 无需传路径) |
+| `outputs/defense.md` | **被告** (答辩状**当前稿**; 重生成时旧版自动归档 `outputs/history/`) | `dsh generate defense` | 提交法院前的润色链: `self-check` → `apply-fixes` → `simulate` → `export-pdf` |
 
 两个高频参数一句话:
 
-- **`<defense>`** (self-check / apply-fixes / simulate 的位置参数) = 答辩状文件路径,即上表第三行。**只有被告有答辩状** — 这三步都是"拿着被告的稿子做文章"。
-- **`--analysis`** = 拆解结果 JSON 路径,即上表第二行。自检/推演需要它,才知道原告主张了什么、被告漏没漏。
+- **`--case <id>`** (推荐): 给了它, self-check / apply-fixes / simulate 自动定位案件目录里的 `outputs/defense.md` 当前稿和 `complaint-analysis.json`, **不用再传任何路径**; 生成答辩状时拆解结果也会被自动使用。
+- **`<defense>` / `--analysis`** = 显式覆盖, 仅当你跨案件引用或要用旧版归档稿时才需要。
 
 ```
 起诉状.pdf ──convert──▶ complaint.md ──analyze-complaint──▶ complaint-analysis.json
                                                               │ (自动回填 case.json 原告/诉请/事实/法院)
-                                          generate defense ───┴─▶ defense-*.md   ◀── 被告的稿子
+                                          generate defense ───┴─▶ defense.md     ◀── 被告的稿子 (当前稿)
                                                                     │
                                 fill (事实缺口回填 JSON→重生成) / self-check (挑漏洞) ─▶ apply-fixes / fill-defense
                                                                     │
-                                            simulate (原被告多轮交锋, 胜诉概率轨迹) ─▶ export-pdf ─▶ 提交法院
+                                            simulate (原被告多轮交锋, 定性风险走势) ─▶ export-pdf ─▶ 提交法院
 ```
 
 ## 5 分钟上手
@@ -86,6 +86,10 @@ DEEPSEEK_API_KEY=sk-你的key
 ```
 
 > 不填 key 也能用 `--draft` 纯模板模式, 只是没有 LLM 润色; 所有命令离线可用。
+>
+> **数据出机提示**: AI 模式会把文书/起诉状**全文**发送到 deepseek/minimax 云端。律师对当事人信息负保密义务 —
+> 首次 AI 调用会弹出确认 (可选"记住"); 拒绝即自动改走离线 draft/rule 路径。
+> 需要全程数据不出本机时, 用 `--draft` / `--mode rule` (功能完整, 仅少 LLM 润色)。
 
 ---
 
@@ -96,6 +100,7 @@ DEEPSEEK_API_KEY=sk-你的key
 ```bash
 # ① 建案 — 只问被告侧信息 (当事人必填; 地址/律师等选填)。
 #    原告/诉请/事实/法院不用手填, ② 拆解起诉状后自动回填。
+#    记得填"收到起诉状副本日期" — 答辩期 15 日与管辖异议窗口靠它倒计时 (漏了可 dsh case set 补)。
 dsh case new def-001
 
 # ② 拆解起诉状 (站原告视角, 把主张拆成结构化 JSON + 四要件评分)
@@ -104,31 +109,29 @@ dsh analyze-complaint 起诉状.pdf --case def-001 --draft
 #    → data/cases/def-001/complaint-analysis.json
 
 # ③ 生成答辩状 (站被告视角, 8 反点自动选型: 每条诉请匹配最适反点)
-dsh generate defense --case def-001 \
-  --from-analysis data/cases/def-001/complaint-analysis.json \
-  --draft
-#    → data/cases/def-001/outputs/defense-<时间戳>.md   ← 后面命令里的 <defense> 就是它
+#    拆解结果自动使用; 输出当前稿 defense.md, 重生成时旧版归档 outputs/history/
+dsh generate defense --case def-001 --draft
 
 # ④ 自检: 换位到原告律师, 攻击你刚写的答辩状, 列出漏洞清单
-dsh self-check data/cases/def-001/outputs/defense-<时间戳>.md \
-  --analysis data/cases/def-001/complaint-analysis.json
+#    (从这步起, 当前稿与拆解 JSON 都由 --case 自动定位)
+dsh self-check --case def-001
 
 # ⑤ 回填事实 + 修补:
 #    事实缺口补进拆解 JSON (唯一事实源, 重生成不丢, 留 _fillLog 审计):
 dsh fill data/cases/def-001/complaint-analysis.json --set "facts.time=2026-03-12" --allow-new
 #    然后重跑 ③, 再注入修补 (程序性反点仅在拆解能确证时才注入, 宁缺毋滥;
 #    目标 patched 已存在时会拒绝覆盖, 确认后加 --yes; 人工改稿用 fill-defense 交互式填充)
-dsh apply-fixes data/cases/def-001/outputs/defense-<时间戳>.md \
-  --analysis data/cases/def-001/complaint-analysis.json
-#    → defense-<时间戳>-patched.md
+dsh apply-fixes --case def-001
+#    → outputs/defense-patched.md
 
-# ⑥ 攻防推演: 模拟原被告多轮交锋, 输出被告胜诉概率轨迹与下一步建议
-dsh simulate data/cases/def-001/outputs/defense-<时间戳>-patched.md \
-  --analysis data/cases/def-001/complaint-analysis.json --case def-001
+# ⑥ 攻防推演: 模拟原被告多轮交锋, 输出风险走向与下一步建议
+dsh simulate --case def-001
 
 # ⑦ 导出法院排版 PDF
-dsh export-pdf data/cases/def-001/outputs/defense-<时间戳>-patched.md
+dsh export-pdf data/cases/def-001/outputs/defense-patched.md
 ```
+
+> 中途隔几天回来不知道走到哪了? `dsh case show <id>` 显示流水线状态、残留占位符数与推荐下一步。
 
 **答辩状包含**:
 - ✅ 总体答辩策略 (按杀伤力排序的 top-3 反点)
@@ -183,31 +186,36 @@ dsh generate evidence-list  --case <id> --draft   # 证据目录
 
 ```
 dsh init                                            初始化项目 (dsh.config.json + .env.local)
-dsh config show / set <key> <value>                 查看/修改配置 (author/llmEnabled/casesDir/outputsDir)
+dsh config show / set <key> <value>                 查看/修改配置 (author/llmEnabled/casesDir/outputsDir/llmCloudConsent)
 dsh case new <id>                                   建案 (只填被告侧; 原告侧见场景 B 注意事项)
-dsh case list / show <id>                           案件列表/详情
+dsh case set <id> servedAt <日期>                    记录收到起诉状副本日 → 答辩期 15 日/管辖异议窗口倒计时
+dsh case list / show <id> [--json]                  案件列表/详情 (show 显示期限倒计时+流水线状态+推荐下一步; --json 输出 case.json 原文)
 dsh convert <file> [--out|--native|--print-meta|--check]  PDF/Word → markdown (纯 Node); PPT/Excel/HTML 需 MarkItDown
 dsh analyze-complaint <起诉状> [选项]               拆解 → complaint-analysis.json
   --case <id>          输出到案件目录并自动回填 case.json (推荐)
   --draft              纯关键词/正则抽取, 不调 LLM
   --extra <text>       给 LLM 的补充指令      --out <path>  自定义输出路径
 dsh generate <type> --case <id> [选项]              生成文书 (letter/complaint/defense/evidence-list)
-  --from-analysis <json>   [仅 defense] 基于拆解结果的反点驱动版 (推荐)
+  [仅 defense] 案件内已有拆解结果时自动走反点驱动版; --from-analysis <json> 显式指定
   --draft / --provider / --output / --extra
-dsh self-check <defense> --analysis <json> [选项]   站原告视角挑漏洞 (rule/ai/hybrid)
+  产物为当前稿 outputs/<type>.md, 覆盖前旧版自动归档 outputs/history/
+dsh self-check [defense] [选项]                     站原告视角挑漏洞 (rule/ai/hybrid)
+  --case <id>            自动定位当前稿+拆解 JSON   --analysis <json>  显式覆盖
   --severe-only          仅显示 critical/high       --out <json>  落盘漏洞清单
-dsh apply-fixes <defense> --analysis <json> [选项]  修补建议自动注入 → *-patched.md
+dsh apply-fixes [defense] [选项]                    修补建议自动注入 → defense-patched.md
+  --case <id>            自动定位 (同上)            --analysis <json>  显式覆盖
   --critical-only        仅注入 critical            --vulnerabilities <json>  复用已有清单
   --yes                  目标 patched 已存在时确认覆盖 (默认拒绝并给分流指引)
 dsh fill <analysis.json> [选项]                     非交互回填拆解 JSON 字段 (补事实的唯一通道)
   --set "路径=值" (可重复)  --from <json>  --allow-new  --out <path>
 dsh fill-defense <file> [--out]                     交互式填充 [待补充] 占位符 (文书层, 人工润色)
-dsh simulate <defense> --analysis <json> [选项]     攻防推演 → 胜诉概率轨迹 (rule/ai)
-  --case <id>  --rounds <n>  --mode <rule|ai>  --out <json>
+dsh simulate [defense] [选项]                       攻防推演 → 风险走向 (rule 定性档 / ai 概率估算, 均非预测)
+  --case <id> 自动定位当前稿+拆解 JSON  --analysis <json>  显式覆盖
+  --rounds <n>  --mode <rule|ai>  --out <json>
 dsh export-pdf <file> [--out|--case-number|--title] markdown → PDF (法院文书排版)
 ```
 
-> `<defense>` = 答辩状 md 路径 (generate defense 的产物);`--analysis` = 拆解 JSON 路径。二者见上文数据流表。
+> `--case <id>` 会让 self-check / apply-fixes / simulate 自动定位 `outputs/defense.md` 当前稿与 `complaint-analysis.json`; 位置参数 `<defense>` 与 `--analysis` 仅在跨案件引用或用归档旧版时需要。
 
 ## Agent 模式 (不想记命令)
 
@@ -254,6 +262,7 @@ defame-shield/
 - **minimax** — model `MiniMax-M3`
 
 切换: `MODEL_PROVIDER=minimax` + `MINIMAX_API_KEY=...`。LLM 失败自动回退 draft,不会丢工作。
+首次 AI 调用前会确认"文书全文将发送至云端" (选择记入 `dsh.config.json` 的 `llmCloudConsent`, 可用 `dsh config set llmCloudConsent false` 重置)。
 
 ## License
 

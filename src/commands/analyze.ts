@@ -7,12 +7,13 @@
 import { writeFileSync, mkdirSync, existsSync } from 'node:fs';
 import { basename, join, dirname } from 'node:path';
 import { analyzeComplaint } from '../analyzer/complaint-parser.js';
-import { DocumentConverter } from '../converters/document-converter.js';
+import { DocumentConverter, visibleTextCount, LOW_TEXT_WARN_THRESHOLD } from '../converters/document-converter.js';
 import { detectFormat } from '../converters/format-detector.js';
 import { out, die } from '../utils/console.js';
 import { writeJsonFile } from '../utils/json.js';
 import { loadConfig } from '../config/config.js';
 import { caseDir, loadCase, mergeAnalysisIntoCase, updateCase } from '../case/case.js';
+import { confirmCloudDisclosure } from '../utils/cloud-consent.js';
 
 export interface AnalyzeFlags {
   draft?: boolean;
@@ -47,15 +48,23 @@ export async function analyzeComplaintCommand(input: string, flags: AnalyzeFlags
     const tempMd = resolveTempMdPath(flags, input);
     writeFileSync(tempMd, result.result.markdown, 'utf-8');
     out.success(`已转换: ${tempMd}  (${result.result.metadata.converter}, ${result.result.metadata.durationMs ?? '?'}ms)`);
+    if (visibleTextCount(result.result.markdown) < LOW_TEXT_WARN_THRESHOLD) {
+      out.warn(`提取到的文字极少 (${visibleTextCount(result.result.markdown)} 字) — 疑似扫描版/图片版, 拆解必然失真; 请换文字源文件或先 OCR 出 complaint.md`);
+    }
     textInput = tempMd;
   } else if (format === 'unsupported') {
     die(`不支持的文件格式: ${input}\n支持的格式: .md, .txt, .pdf, .docx, .pptx, .xlsx, .html`);
   }
 
-  out.info(`拆解起诉状: ${basename(textInput)}  /  模式: ${flags.draft ? 'draft (关键词)' : 'AI'}`);
+  let draft = flags.draft ?? false;
+  if (!draft && !(await confirmCloudDisclosure(flags.provider))) {
+    draft = true;
+  }
+
+  out.info(`拆解起诉状: ${basename(textInput)}  /  模式: ${draft ? 'draft (关键词)' : 'AI'}`);
 
   const result = await analyzeComplaint(textInput, {
-    draft: flags.draft,
+    draft,
     provider: flags.provider as 'deepseek' | 'minimax' | undefined,
     extraInstruction: flags.extra,
   });
@@ -83,6 +92,9 @@ export async function analyzeComplaintCommand(input: string, flags: AnalyzeFlags
     if (existing) {
       updateCase(config, mergeAnalysisIntoCase(existing, result.analysis));
       out.success(`已回填 case.json: 原告 ${result.analysis.parties.原告.name || '(未识别)'} / 诉请 ${result.analysis.claims.length} 条 / 法院 ${result.analysis.courtOfFiling ?? '(未识别)'}`);
+      if (result.analysis.filingDate && !existing.servedAt) {
+        out.info(`起诉状落款日期: ${result.analysis.filingDate}。答辩期自你收到副本之日起算 15 日 (管辖异议须同期提出) — 记录送达日期可获倒计时: dsh case set ${flags.case} servedAt <YYYY-MM-DD>`);
+      }
     } else {
       out.info(`该目录尚无 case.json — 运行 \`dsh case new ${flags.case}\` 建案后重新拆解可自动回填当事人信息`);
     }

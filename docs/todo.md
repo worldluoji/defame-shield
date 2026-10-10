@@ -29,8 +29,8 @@
 > 触发条件: 真实起诉状样本出现 PDF 抽取乱码/丢内容时再做, 不要提前实施。
 
 - [ ] PDF 路径切换 `pymupdf4llm`: 中文数字 PDF 抽取质量更好, 仅改 `src/converters/document-converter.ts` 的 format 路由, docx/pptx/xlsx 继续走 markitdown
-- [ ] 扫描件 PDF: 提示律师补交 docx/文本版; 本地 OCR (PaddleOCR, 中文效果好) 视需求排期, 与 `markitdown-adapter.ts` 已预留的 Azure Document Intelligence 钩子二选一
-- [ ] `dsh convert` 输出质量自检: 转换结果为空/乱码比例过高时给出警告而非静默通过
+- [ ] 扫描件本地 OCR (PaddleOCR, 中文效果好) 视需求排期, 与 `markitdown-adapter.ts` 已预留的 Azure Document Intelligence 钩子二选一
+- [x] `dsh convert` 输出质量自检 (2026-10-09): 空壳结果直接报"扫描版"错误并给换源/OCR 指引 (markitdown 与纯 Node 两路都拦); 文字量 <30 字时警告; 不再给"装 markitdown 就能 OCR"的误导提示
 
 ## 方向 4: 法律检索
 

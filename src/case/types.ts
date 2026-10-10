@@ -66,6 +66,8 @@ export interface Case {
   evidence: Evidence[];
   /** 管辖法院 (选填) */
   court?: string;
+  /** 收到起诉状副本日期 (被告侧, 选填, YYYY-MM-DD) — 答辩期 15 日/管辖异议窗口倒计时基准; 送达日只有被告知道, 无法从起诉状推导 */
+  servedAt?: string;
   /** 案件创建时间 ISO */
   createdAt: string;
   /** 最后修改时间 ISO */

@@ -2,7 +2,7 @@
  * 攻防推演 + 法条版本检查 测试
  */
 import { describe, it, expect } from 'vitest';
-import { simulateBattle } from '../src/rebuttal/simulator';
+import { simulateBattle, riskBand } from '../src/rebuttal/simulator';
 import { checkAllStatutes, checkStatute, STATUTE_REGISTRY } from '../src/data/statutes';
 import type { ComplaintAnalysis } from '../src/analyzer/complaint-types';
 import type { Case } from '../src/case/types';
@@ -139,6 +139,39 @@ describe('simulateBattle (rule 模式)', () => {
       rounds: 'abc' as unknown as number,
     });
     expect(rBad.rounds.length).toBe(4); // 回退默认 3
+  });
+});
+
+describe('rule 模式定性风险档 (非预测)', () => {
+  it('riskBand 三档划分', () => {
+    expect(riskBand(100)).toBe('有利');
+    expect(riskBand(70)).toBe('有利');
+    expect(riskBand(69)).toBe('中性');
+    expect(riskBand(40)).toBe('中性');
+    expect(riskBand(39)).toBe('不利');
+  });
+
+  it('rule 模式整体建议用定性档位, 不含精确百分比', async () => {
+    const r = await simulateBattle({
+      case: sampleCase,
+      analysis: sampleAnalysis,
+      defense: '## 答辩',
+    });
+    expect(r.overallAdvice).toContain('态势');
+    expect(r.overallAdvice).toContain('非胜诉率预测');
+    expect(r.overallAdvice).not.toMatch(/\d+%/);
+  });
+
+  it('rule 推演轮次内容也不含精确百分比', async () => {
+    const r = await simulateBattle({
+      case: sampleCase,
+      analysis: sampleAnalysis,
+      defense: '## 答辩',
+      rounds: 3,
+    });
+    for (const round of r.rounds.slice(2)) {
+      expect(round.content).not.toMatch(/胜诉概率 \d+%/);
+    }
   });
 });
 

@@ -34,20 +34,24 @@ ls data/cases/               # 参考样本: def-sample-001/ (含 complaint-anal
 ### 2. 建案 + 拆解
 
 ```bash
-dsh case new <id>                                    # 只填被告侧 (姓名/法院/日期)
+dsh case new <id>                                    # 只填被告侧 (姓名/法院/收到起诉状副本日期)
 dsh convert <起诉状.pdf> --out data/cases/<id>/complaint.md
 dsh analyze-complaint data/cases/<id>/complaint.md --case <id> --draft
 ```
+
+送达日期 (`servedAt`) 起诉状里没有、只有当事人知道 — 若建案时没拿到, 追问时要补记:
+`dsh case set <id> servedAt <YYYY-MM-DD>`, 否则 `case show` 的答辩期/管辖异议窗口倒计时无法生效。
 
 → `data/cases/<id>/complaint-analysis.json` (主体/诉请/事实/证据 + 四要件评分)
 
 ### 3. 先出一版初稿 (让用户看到全貌)
 
 ```bash
-dsh generate defense --case <id> --from-analysis data/cases/<id>/complaint-analysis.json --draft --output defense.md
+dsh generate defense --case <id> --draft
 ```
 
-→ `data/cases/<id>/outputs/defense.md`, 其中 `[待补充: ...]` 就是接下来要问的。
+(案件内拆解结果自动使用, 产物即当前稿 `outputs/defense.md`, 旧版自动归档 `outputs/history/`)
+→ 其中 `[待补充: ...]` 就是接下来要问的。
 
 ### 4. 追问协议 (核心环节)
 
@@ -71,7 +75,7 @@ cat > /tmp/answers.json <<'EOF'
 ]
 EOF
 dsh fill data/cases/<id>/complaint-analysis.json --from /tmp/answers.json --allow-new
-dsh generate defense --case <id> --from-analysis data/cases/<id>/complaint-analysis.json --draft --output defense.md
+dsh generate defense --case <id> --draft
 ```
 
 `fill` 规则: 默认只写**已存在**字段 (防你笔误造字段); `--allow-new` 放行末端新增 (如 filingDate); 任一路径非法 → 整批不写入; 每次回填在 JSON 里追加 `_fillLog` 审计记录 (path/previous/value/filledAt)。
@@ -79,12 +83,10 @@ dsh generate defense --case <id> --from-analysis data/cases/<id>/complaint-analy
 ### 6. 自检 → 修补闭环
 
 ```bash
-dsh self-check data/cases/<id>/outputs/defense.md --analysis data/cases/<id>/complaint-analysis.json \
+dsh self-check --case <id> \
   --out data/cases/<id>/outputs/defense-vulnerabilities.json   # 不加 --out 则只打印报告
 
-dsh apply-fixes data/cases/<id>/outputs/defense.md \
-  --analysis data/cases/<id>/complaint-analysis.json \
-  --out data/cases/<id>/outputs/defense-patched.md
+dsh apply-fixes --case <id> --out data/cases/<id>/outputs/defense-patched.md
 ```
 
 - 仍有事实类漏洞 → 回第 4 步再问一轮。
@@ -96,7 +98,7 @@ dsh apply-fixes data/cases/<id>/outputs/defense.md \
 向用户报告:
 1. 终稿路径 (`outputs/defense-patched.md` 或 `defense.md`)
 2. 残留 `[待补充]` 占位符数量及位置 — 提示人工补完后再 `dsh fill-defense` 或回第 5 步
-3. 下一步: `dsh simulate` 攻防推演评估胜算 / `dsh export-pdf` 出法院排版 (或提示用户另行发起)
+3. 下一步: `dsh simulate` 攻防推演看风险走向 / `dsh export-pdf` 出法院排版 (或提示用户另行发起)
 
 ## 命令速查
 
@@ -105,9 +107,9 @@ dsh apply-fixes data/cases/<id>/outputs/defense.md \
 | `dsh convert <file> [--out] [--check]` | PDF/Word → markdown |
 | `dsh case new <id>` / `case list` / `case show <id>` | 案件管理 (被告侧信息) |
 | `dsh analyze-complaint <起诉状> --case <id> --draft` | 拆解 → complaint-analysis.json |
-| `dsh generate defense --case <id> --from-analysis <json> [--draft] --output <name>.md` | 答辩状 → outputs/<name>.md |
-| `dsh self-check <defense> --analysis <json> [--mode rule] [--out <json>]` | 抗攻击自检 (--out 才落盘漏洞清单) |
-| `dsh apply-fixes <defense> --analysis <json> [--out <file>] [--yes]` | 注入修补 → *-patched.md (目标已存在需 --yes) |
+| `dsh generate defense --case <id> [--draft]` | 答辩状 → outputs/defense.md 当前稿 (自动用案件内拆解; 旧版归档 history/) |
+| `dsh self-check [defense] [--case <id>] [--mode rule] [--out <json>]` | 抗攻击自检 (--case 自动定位; --out 才落盘漏洞清单) |
+| `dsh apply-fixes [defense] [--case <id>] [--out <file>] [--yes]` | 注入修补 → defense-patched.md (目标已存在需 --yes) |
 | `dsh fill <analysis.json> [--set "路径=值"] / [--from patches.json] [--allow-new] [--out]` | JSON 层回填 (留 _fillLog) |
 | `dsh fill-defense <file> [--out]` | 文书层交互式填充 (**人工**润色用, 你不用交互命令) |
 

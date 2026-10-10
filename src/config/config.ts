@@ -15,6 +15,8 @@ export interface DshConfig {
   author: string;
   /** 是否启用 LLM 增强 (false 时所有 generate 走纯模板 draft 模式) */
   llmEnabled: boolean;
+  /** 已确认"AI 模式 = 文书全文发送到云端" (true = 记住同意; 未设置/false = 交互时仍询问) */
+  llmCloudConsent?: boolean;
 }
 
 const DEFAULT_CONFIG: DshConfig = {
