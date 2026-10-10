@@ -50,10 +50,13 @@ export async function analyzeComplaint(input: string, opts: AnalyzeOptions = {})
 
   const parsed = parseAndValidateLLMJson(llmResult.text, input);
   if (!parsed.ok) {
+    // 解析失败 (含宽松修复仍失败) 同样给 draft 兜底, 与 llm_error 路径一致 — 不让流水线死在畸形输出上
+    const draftAnalysis = extractByKeywords(text, input);
     return {
       ok: false,
-      error: `LLM 输出解析失败: ${parsed.error}\n原始输出: ${llmResult.text.slice(0, 500)}`,
+      error: `LLM 输出解析失败: ${parsed.error}\n已 fallback 到 draft 模式\n原始输出: ${llmResult.text.slice(0, 500)}`,
       code: 'invalid_format',
+      partialDraft: draftAnalysis,
     };
   }
 

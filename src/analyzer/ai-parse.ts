@@ -3,7 +3,7 @@
  *
  * 独立模块: LLM 输出是外部不可信数据, 这里的 normalize* 是唯一事实源字段兜底
  */
-import { extractJsonSource } from '../utils/json-extract.js';
+import { extractJsonSource, parseJsonLenient } from '../utils/json-extract.js';
 import { classifyLawCategory, extractArticleNumber } from './law-utils.js';
 import type {
   ComplaintAnalysis,
@@ -25,12 +25,11 @@ export function parseAndValidateLLMJson(
 ): { ok: true; analysis: ComplaintAnalysis } | { ok: false; error: string } {
   const jsonText = extractJsonSource(raw) ?? raw.trim();
 
-  let parsed: unknown;
-  try {
-    parsed = JSON.parse(jsonText);
-  } catch (e) {
-    return { ok: false, error: `JSON.parse 失败: ${(e as Error).message}` };
+  const parsedRes = parseJsonLenient(jsonText);
+  if (!parsedRes.ok) {
+    return { ok: false, error: `JSON.parse 失败: ${parsedRes.error}` };
   }
+  const parsed = parsedRes.data;
 
   // 基础字段校验
   if (!parsed || typeof parsed !== 'object') {
@@ -73,6 +72,10 @@ export function parseAndValidateLLMJson(
   // AI 漏抽诉请时显式告警, 否则下游答辩状没有"逐条反驳"且自检无从发现缺口
   if (analysis.claims.length === 0) {
     analysis.warnings.push('AI 未识别出任何诉讼请求, 请检查起诉状"诉讼请求/请求事项"段落, 或改用 --draft 对照');
+  }
+
+  if (parsedRes.repaired) {
+    analysis.warnings.push('AI 输出 JSON 存在畸形/截断, 已自动修复解析 — 请人工核对拆解结果是否完整 (末尾字段最易缺失)');
   }
 
   return { ok: true, analysis };

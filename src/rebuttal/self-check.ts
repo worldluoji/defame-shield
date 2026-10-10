@@ -12,7 +12,7 @@
  */
 
 import { callLLM } from '../llm/client.js';
-import { extractJsonSource } from '../utils/json-extract.js';
+import { extractJsonSource, parseJsonLenient } from '../utils/json-extract.js';
 import type { ComplaintAnalysis } from '../analyzer/complaint-types.js';
 import type { RebuttalStrategy, StrategyId } from './strategies-base.js';
 import { STRATEGIES, PROCEDURAL_IDS } from './strategies.js';
@@ -458,12 +458,8 @@ function normalizeVulnerability(item: unknown, i: number): Vulnerability {
 function extractJsonArray(text: string): unknown[] | null {
   const src = extractJsonSource(text, 'array');
   if (!src) return null;
-  try {
-    const parsed = JSON.parse(src);
-    return Array.isArray(parsed) ? parsed : null;
-  } catch {
-    return null;
-  }
+  const r = parseJsonLenient(src);
+  return r.ok && Array.isArray(r.data) ? r.data : null;
 }
 
 function mergeAndDedup(ruleVulns: Vulnerability[], aiVulns: Vulnerability[]): Vulnerability[] {

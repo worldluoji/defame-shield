@@ -16,7 +16,7 @@
  */
 
 import { callLLM } from '../llm/client.js';
-import { extractJsonSource } from '../utils/json-extract.js';
+import { extractJsonSource, parseJsonLenient } from '../utils/json-extract.js';
 import { detectUsedStrategies, respondsToClaim } from './detect.js';
 import type { StrategyId } from './strategies-base.js';
 import type { ComplaintAnalysis } from '../analyzer/complaint-types.js';
@@ -381,11 +381,8 @@ ${prev.content}
 function extractJson(text: string): unknown {
   const src = extractJsonSource(text, 'object');
   if (!src) return null;
-  try {
-    return JSON.parse(src);
-  } catch {
-    return null;
-  }
+  const r = parseJsonLenient(src);
+  return r.ok ? r.data : null;
 }
 
 function computeTrend(traj: number[]): 'improving' | 'stable' | 'worsening' {
