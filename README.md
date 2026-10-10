@@ -120,12 +120,18 @@ dsh self-check --case def-001
 
 # ⑤ 回填事实 + 修补:
 #    原告主张口径的事实缺口 → 补进拆解 JSON (唯一事实源, 重生成不丢, 留 _fillLog 审计):
+#    "路径" = complaint-analysis.json 的点路径 (看结构: cat data/cases/def-001/complaint-analysis.json)。
+#    常用: facts.time 侵权时间 (时效反点基准) / facts.spread 传播范围 / facts.place 侵权发生地 (管辖反点)
+#          / filingDate 起诉日期 / parties.被告.name 等主体字段。时间字段用 YYYY-MM-DD。
 dsh fill --case def-001 --set "facts.time=2026-03-12" --allow-new
 #    被告自己的版本 (陈述/证据) → 写 case.json, 生成答辩状时渲染进"答辩人的事实主张"与证据指引:
 dsh case set def-001 defendantFacts "涉案内容为真实消费评价, 与原告无恩怨"
 dsh case set def-001 evidence 证据.json        # 数组或 {evidence:[...]} 格式
-#    然后重跑 ③, 再注入修补 (程序性反点仅在拆解能确证时才注入, 宁缺毋滥;
-#    目标 patched 已存在时会拒绝覆盖, 确认后加 --yes; 人工改稿用 fill-defense 交互式填充)
+#    然后重跑 ③, 让最新事实进稿。
+# ⑤' apply-fixes = 执行 ④ 的修补: 把不需人为判断的漏洞机械注入答辩状 —
+#    程序性反点补位 (仅在拆解数据能确证时注入, 宁缺毋滥) / 残留占位符生成待办清单 /
+#    漏回应的诉请补反驳段 / 证据指引强化。产出交付版, 律师只处理真正需要判断的内容。
+#    (目标 patched 已存在时会拒绝覆盖, 确认后加 --yes; 人工改稿用 fill-defense 交互式填充)
 dsh apply-fixes --case def-001
 #    → outputs/defense-patched.md
 
@@ -210,12 +216,12 @@ dsh generate <type> --case <id> [选项]              生成文书 (letter/compl
 dsh self-check [defense] [选项]                     站原告视角挑漏洞 (rule/ai/hybrid)
   --case <id>            自动定位当前稿+拆解 JSON   --analysis <json>  显式覆盖
   --severe-only          仅显示 critical/high       --out <json>  落盘漏洞清单
-dsh apply-fixes [defense] [选项]                    修补建议自动注入 → defense-patched.md
+dsh apply-fixes [defense] [选项]                    执行 self-check 的修补: 机械注入程序性反点/占位符待办/诉请回应/证据强化 → defense-patched.md
   --case <id>            自动定位 (同上)            --analysis <json>  显式覆盖
   --critical-only        仅注入 critical            --vulnerabilities <json>  复用已有清单
   --yes                  目标 patched 已存在时确认覆盖 (默认拒绝并给分流指引)
 dsh fill [analysis.json] [选项]                     非交互回填拆解 JSON (补**原告主张**事实缺口的唯一通道; 被告版本走 case set)
-  --case <id> 自动定位拆解 JSON  --set "路径=值" (可重复)  --from <json>  --allow-new  --out <path>
+  --case <id> 自动定位拆解 JSON  --set "路径=值" (点路径=complaint-analysis.json 结构, 可重复)  --from <json>  --allow-new  --out <path>
 dsh fill-defense <file> [--out]                     交互式填充 [待补充] 占位符 (文书层, 人工润色)
 dsh simulate [defense] [选项]                       攻防推演 → 风险走向 (rule 定性档 / ai 概率估算, 均非预测)
   --case <id> 自动定位当前稿+拆解 JSON  --analysis <json>  显式覆盖
