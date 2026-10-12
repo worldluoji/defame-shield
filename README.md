@@ -126,7 +126,13 @@ dsh self-check --case def-001
 dsh fill --case def-001 --set "facts.time=2026-03-12" --allow-new
 #    被告自己的版本 (陈述/证据) → 写 case.json, 生成答辩状时渲染进"答辩人的事实主张"与证据指引:
 dsh case set def-001 defendantFacts "涉案内容为真实消费评价, 与原告无恩怨"
-dsh case set def-001 evidence 证据.json        # 数组或 {evidence:[...]} 格式
+dsh case set def-001 evidence 证据.json        # 数组或 {evidence:[...]} 格式, 整组替换 (再跑一次全量覆盖旧的)
+#    证据 JSON 字段: name/kind/purpose 必填, source 选填, index 自动编号;
+#    kind 限法定证据种类: 书证/物证/视听资料/电子数据/证人证言/鉴定意见/勘验笔录。
+#    截图没在手也没关系 — 只登记文字描述即可:
+#    [{ "name": "涉案评价页面截图(含URL与时间)", "kind": "电子数据", "purpose": "证明内容未指名道姓", "source": "微博网页" }]
+#    导入后两处生效: generate defense 渲染"答辩人已掌握证据"节; simulate 按
+#    "证据客观存在且经质证成立"假设评估胜率 (purpose 措辞贴近反点补证建议更容易被匹配命中)。
 #    然后重跑 ③, 让最新事实进稿。
 # ⑤' apply-fixes = 执行 ④ 的修补: 把不需人为判断的漏洞机械注入答辩状 —
 #    程序性反点补位 (仅在拆解数据能确证时注入, 宁缺毋滥) / 残留占位符生成待办清单 /
@@ -202,7 +208,7 @@ dsh config show / set <key> <value>                 查看/修改配置 (author/
 dsh case new <id>                                   建案 (只填被告侧; 原告侧见场景 B 注意事项)
 dsh case set <id> servedAt <日期>                    记录收到起诉状副本日 → 答辩期 15 日/管辖异议窗口倒计时
 dsh case set <id> defendantFacts <文本>              被告方陈述 (自己的事实版本) → 答辩状"答辩人的事实主张"节
-dsh case set <id> evidence <证据.json>               导入被告证据清单 (整组替换) → 答辩状"已掌握证据"
+dsh case set <id> evidence <证据.json>               导入被告证据清单 (整组替换) → 答辩状"已掌握证据" + simulate 假设评估 (格式见场景 A ⑤)
 dsh case list / show <id> [--json]                  案件列表/详情 (show 显示期限倒计时+流水线状态+推荐下一步; --json 输出 case.json 原文)
 dsh convert <file> [--out|--native|--print-meta|--check]  PDF/Word → markdown (纯 Node); PPT/Excel/HTML 需 MarkItDown
 dsh analyze-complaint <起诉状> [选项]               拆解 → complaint-analysis.json

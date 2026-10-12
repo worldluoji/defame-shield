@@ -22,7 +22,7 @@ pi 的项目级发现路径为 `.pi/skills/` 与 `.agents/skills/` (含 SKILL.md
 ## 设计约定 (新增/修改 skill 时遵守)
 
 - **agent 是编排者, dsh 是事实源** — skill 里让模型「运行已存在的 dsh 命令」, 绝不让模型自由生成文书正文
-- **事实缺口的唯一通道是 `dsh fill`** — 文书永远从 complaint-analysis.json 重生成; skill 不得引导模型直接编辑 md
+- **补事实只有两条通道**: 原告主张口径的缺口走 `dsh fill` (写回 complaint-analysis.json), 被告自己的陈述/证据走 `dsh case set defendantFacts|evidence` (写回 case.json) — 文书永远重生成, skill 不得引导模型直接编辑 md
 - **宁缺毋滥**: 律师没给的值保留 `[待补充]`, skill 中把「不编造」列为硬红线
 - skill 里的命令示例必须与 `dsh <cmd> --help` 实测一致, 改动命令接口时同步更新此处
 - 保持纯 markdown (frontmatter: name + description), 不引入构建步骤 — 与 Agent Skills 标准互通

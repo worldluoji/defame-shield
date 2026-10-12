@@ -61,7 +61,7 @@ dsh generate defense --case <id> --draft
 1. **Read** `complaint-analysis.json`, 列出所有空串/null/缺失字段 (重点: `parties.被告.name/idNumber/address`、`facts.time/place/spread`、`filingDate`、`courtOfFiling`)
 2. **逐条问, 一次一个字段**, 每条带「用在哪、为什么需要」, 例:
    > 「发帖时间」用于诉讼时效反点 (民诉法解释: 知道权利受损起 3 年), 起诉状只写了"今年3月" — 具体日期?
-3. **必问被告侧** (起诉状里永远没有的信息): 「答辩人的事实主张」这节需要被告自己的版本 — 与原告的关系/涉案内容的真实来源/为何发布; 以及被告手上已有哪些证据。答案回填走 `dsh case set`, 不走 `fill`。
+3. **必问被告侧** (起诉状里永远没有的信息): 「答辩人的事实主张」这节需要被告自己的版本 — 与原告的关系/涉案内容的真实来源/为何发布; 以及被告手上已有哪些证据 (截图类没在手也可先文字登记名称/种类/证明目的, 之后原件到手再补)。答案回填走 `dsh case set`, 不走 `fill`。
 4. 律师答不上 → 保留 `[待补充]`, 记入最终交付清单。**不要追问第二轮**。
 5. 用户说「就这些」→ 停止追问, 进入回填。
 
@@ -82,7 +82,9 @@ dsh fill --case <id> --from /tmp/answers.json --allow-new
 
 # 被告侧 (陈述 → "答辩人的事实主张"节; 证据 → "已掌握证据"):
 dsh case set <id> defendantFacts "涉案内容系真实消费评价, 与原告无恩怨"
-dsh case set <id> evidence /tmp/evidence.json   # [{name,kind,purpose,source?}, ...] 或 {evidence:[...]}
+dsh case set <id> evidence /tmp/evidence.json   # [{name,kind,purpose,source?}, ...] 或 {evidence:[...]}, 整组替换
+#   kind 限: 书证/物证/视听资料/电子数据/证人证言/鉴定意见/勘验笔录;
+#   purpose 措辞尽量贴近反点补证建议 (simulate 按关键词覆盖匹配, 命中才给该反点加假设分并列出匹配对)
 
 dsh generate defense --case <id> --draft
 ```
@@ -120,6 +122,7 @@ dsh apply-fixes --case <id> --out data/cases/<id>/outputs/defense-patched.md
 | `dsh generate defense --case <id> [--draft]` | 答辩状 → outputs/defense.md 当前稿 (自动用案件内拆解; 旧版归档 history/) |
 | `dsh self-check [defense] [--case <id>] [--mode rule] [--out <json>]` | 抗攻击自检 (--case 自动定位; --out 才落盘漏洞清单) |
 | `dsh apply-fixes [defense] [--case <id>] [--out <file>] [--yes]` | 注入修补 → defense-patched.md (目标已存在需 --yes) |
+| `dsh simulate [--case <id>] [--rounds n] [--mode rule|ai] [--out <json>]` | 攻防推演 → 风险走向 (已登记证据按"存在且经质证成立"假设评估) |
 | `dsh fill [--case <id> \| <analysis.json>] [--set "路径=值"] / [--from patches.json] [--allow-new] [--out]` | JSON 层回填 (留 _fillLog) |
 | `dsh fill-defense <file> [--out]` | 文书层交互式填充 (**人工**润色用, 你不用交互命令) |
 
