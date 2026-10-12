@@ -1,11 +1,21 @@
 /**
  * 攻防推演 + 法条版本检查 测试
  */
-import { describe, it, expect } from 'vitest';
+import { describe, it, expect, vi } from 'vitest';
 import { simulateBattle, riskBand } from '../src/rebuttal/simulator';
 import { checkAllStatutes, checkStatute, STATUTE_REGISTRY } from '../src/data/statutes';
+import { callLLM } from '../src/llm/client';
 import type { ComplaintAnalysis } from '../src/analyzer/complaint-types';
-import type { Case } from '../src/case/types';
+import type { Case, Evidence } from '../src/case/types';
+
+vi.mock('../src/llm/client', () => ({
+  callLLM: vi.fn(),
+  AI_MODELS: {
+    deepseek: { maxOutputTokens: 8192 },
+    minimax: { maxOutputTokens: 16384 },
+  },
+  resolveProvider: (p?: string) => p ?? 'deepseek',
+}));
 
 const sampleAnalysis: ComplaintAnalysis = {
   source: 'test',
@@ -139,6 +149,85 @@ describe('simulateBattle (rule 模式)', () => {
       rounds: 'abc' as unknown as number,
     });
     expect(rBad.rounds.length).toBe(4); // 回退默认 3
+  });
+});
+
+describe('simulate 证据假设评估 (case.evidence what-if)', () => {
+  const FACT_TRUE_DEFENSE =
+    '## 总体答辩策略\n被告的微博内容有合理信息来源, 已尽到合理核实义务, 属于舆论监督的免责情形。\n';
+  const newsArchive: Evidence = {
+    index: 1,
+    name: '新闻报道存档',
+    kind: '书证',
+    purpose: '证明信息来源',
+  };
+
+  it('证据覆盖反点补证项 → +3 加分, 匹配对透出, 缺口只列未覆盖项', async () => {
+    const without = await simulateBattle({ case: sampleCase, analysis: sampleAnalysis, defense: FACT_TRUE_DEFENSE });
+    const with_ = await simulateBattle({
+      case: { ...sampleCase, evidence: [newsArchive] },
+      analysis: sampleAnalysis,
+      defense: FACT_TRUE_DEFENSE,
+    });
+    expect(with_.rounds[1]!.defendantWinProb).toBe(without.rounds[1]!.defendantWinProb + 3);
+    const kps = with_.rounds[1]!.keyPoints.join('\n');
+    expect(kps).toContain('已有证据支撑(假设成立)');
+    expect(kps).toContain('信息来源的原始材料'); // 匹配对里透出, 供律师核对
+    const gaps = with_.rounds[1]!.evidenceGaps.filter((g) => g.startsWith('证据缺口('));
+    expect(gaps).toHaveLength(2); // fact-true 3 项补证, 1 项被覆盖
+    expect(gaps.join('\n')).not.toContain('信息来源的原始材料');
+  });
+
+  it('未登记证据 → 不产生假设评估 (行为与原来一致)', async () => {
+    const r = await simulateBattle({ case: sampleCase, analysis: sampleAnalysis, defense: FACT_TRUE_DEFENSE });
+    expect(r.rounds[1]!.keyPoints.join('\n')).not.toContain('已有证据支撑');
+    expect(r.rounds[1]!.evidenceGaps.filter((g) => g.startsWith('证据缺口('))).toHaveLength(0);
+  });
+
+  it('加分按反点计 (每反点 +3), 不按补证条数累计', async () => {
+    const without = await simulateBattle({ case: sampleCase, analysis: sampleAnalysis, defense: FACT_TRUE_DEFENSE });
+    const r = await simulateBattle({
+      case: {
+        ...sampleCase,
+        evidence: [
+          newsArchive,
+          { index: 2, name: '采访录音', kind: '视听资料', purpose: '发布前核实' },
+          { index: 3, name: '行业协会认定文件', kind: '书证', purpose: '权威第三方证明' },
+        ],
+      },
+      analysis: sampleAnalysis,
+      defense: FACT_TRUE_DEFENSE,
+    });
+    // fact-true 3 项补证全覆盖, 但只算 1 个反点 → +3
+    expect(r.rounds[1]!.defendantWinProb).toBe(without.rounds[1]!.defendantWinProb + 3);
+    expect(r.rounds[1]!.evidenceGaps.filter((g) => g.startsWith('证据缺口('))).toHaveLength(0);
+  });
+
+  it('AI 模式: prompt 注入证据清单与假设口径', async () => {
+    vi.mocked(callLLM).mockReset();
+    vi.mocked(callLLM).mockResolvedValue({ ok: false, code: 'network_error', error: 'offline' });
+    const r = await simulateBattle({
+      case: { ...sampleCase, evidence: [newsArchive] },
+      analysis: sampleAnalysis,
+      defense: FACT_TRUE_DEFENSE,
+      mode: 'ai',
+      rounds: 2,
+    });
+    expect(r.ok).toBe(true);
+    expect(callLLM).toHaveBeenCalled();
+    const msgs = vi.mocked(callLLM).mock.calls[0]![0];
+    const user = msgs.find((m) => m.role === 'user')!.content;
+    expect(user).toContain('已掌握证据');
+    expect(user).toContain('客观存在且经庭审质证成立');
+    expect(user).toContain('新闻报道存档');
+  });
+
+  it('AI 模式: 无证据时不注入证据假设段', async () => {
+    vi.mocked(callLLM).mockReset();
+    vi.mocked(callLLM).mockResolvedValue({ ok: false, code: 'network_error', error: 'offline' });
+    await simulateBattle({ case: sampleCase, analysis: sampleAnalysis, defense: FACT_TRUE_DEFENSE, mode: 'ai', rounds: 2 });
+    const user = vi.mocked(callLLM).mock.calls[0]![0].find((m) => m.role === 'user')!.content;
+    expect(user).not.toContain('已掌握证据');
   });
 });
 

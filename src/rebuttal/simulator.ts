@@ -18,9 +18,10 @@
 import { callLLM } from '../llm/client.js';
 import { extractJsonSource, parseJsonLenient } from '../utils/json-extract.js';
 import { detectUsedStrategies, respondsToClaim } from './detect.js';
+import { STRATEGIES } from './strategies.js';
 import type { StrategyId } from './strategies-base.js';
 import type { ComplaintAnalysis } from '../analyzer/complaint-types.js';
-import type { Case } from '../case/types.js';
+import type { Case, Evidence } from '../case/types.js';
 
 /** 反点命中后的加分权重 (程序性一票否决 > 实体) */
 const STRATEGY_SCORE: Record<StrategyId, number> = {
@@ -190,10 +191,34 @@ export async function simulateBattle(opts: SimulateOptions): Promise<SimulationR
   };
 }
 
+/** 证据关键词提取的停用词 (太泛, 匹配了也不说明证据真能支撑该补证项) */
+const EVIDENCE_STOPWORDS = ['证明', '说明', '相关', '材料', '情况', '内容', '提交', '提供', '涉案', '发布', '原告', '被告'];
+
+/** 证据 name+purpose → CJK 连续串切成的 2 字滑动窗口 (与反点补证建议做覆盖匹配的关键词) */
+function evidenceKeywords(ev: Evidence): Set<string> {
+  const kws = new Set<string>();
+  for (const run of `${ev.name} ${ev.purpose}`.match(/[一-鿿]{2,}/g) ?? []) {
+    for (let i = 0; i + 2 <= run.length; i++) {
+      const g = run.slice(i, i + 2);
+      if (!EVIDENCE_STOPWORDS.includes(g)) kws.add(g);
+    }
+  }
+  return kws;
+}
+
+/** 补证建议被该证据关键词命中的个数 (≥2 视为覆盖, 单词命中误报率太高) */
+function matchedKeywordCount(ev: Evidence, gatherItem: string): number {
+  let n = 0;
+  for (const k of evidenceKeywords(ev)) {
+    if (gatherItem.includes(k)) n++;
+  }
+  return n;
+}
+
 /**
  * 评估被告答辩状强度 (Round 1)
  */
-function scoreDefense(defense: string, analysis: ComplaintAnalysis, _c: Case): {
+function scoreDefense(defense: string, analysis: ComplaintAnalysis, c: Case): {
   score: number;
   keyPoints: string[];
   evidenceGaps: string[];
@@ -204,10 +229,29 @@ function scoreDefense(defense: string, analysis: ComplaintAnalysis, _c: Case): {
   const evidenceGaps: string[] = [];
 
   // 反点命中 (与 self-check 共用 detect.ts 口径)
+  // 已登记证据 (case set evidence) 参与 what-if 推演: 截图等原件未在手, 按"客观存在且经质证成立"假设评估
+  const evidence = c.evidence;
+  let assumedEvidenceScore = 0;
   for (const id of detectUsedStrategies(defense)) {
     score += STRATEGY_SCORE[id];
     keyPoints.push(STRATEGY_KEYPOINT[id]);
+
+    if (evidence.length === 0) continue;
+    const strategy = STRATEGIES[id];
+    let covered = false;
+    for (const item of strategy.evidenceToGather) {
+      const supporter = evidence.find((ev) => matchedKeywordCount(ev, item) >= 2);
+      if (supporter) {
+        covered = true;
+        const pair = `已有证据支撑(假设成立): 证据${supporter.index}「${supporter.name}」→ ${item}`;
+        if (!keyPoints.includes(pair)) keyPoints.push(pair);
+      } else {
+        evidenceGaps.push(`证据缺口(${strategy.name}): ${item}`);
+      }
+    }
+    if (covered) assumedEvidenceScore += 3;
   }
+  score += Math.min(assumedEvidenceScore, 9);
 
   // 占位符未填 -10/-20
   const placeholders = (defense.match(/\[待补充[^\]]*\]|\[(来源|账号|核实|平台|具体)[^\]]{0,30}\]/g) ?? []).length;
@@ -337,10 +381,17 @@ async function aiBasedSimulate(
 - evidenceGaps: 1-3 个证据缺口
 - nextAction: 建议下一步`;
 
+  const evSection =
+    opts.case.evidence.length > 0
+      ? `\n## 已掌握证据 (仅文字登记, 未提供原件 — 一律按"客观存在且经庭审质证成立"假设评估)\n\n${opts.case.evidence
+          .map((e) => `${e.index}. ${e.name}（${e.kind}）：${e.purpose}${e.source ? `（来源：${e.source}）` : ''}`)
+          .join('\n')}\n`
+      : '';
+
   const user = `## 案件背景
 
 ${JSON.stringify({ case: opts.case, analysis: opts.analysis }, null, 2)}
-
+${evSection}
 ## 前一轮 (${prev.type}, 被告胜诉概率 ${prev.defendantWinProb}%)
 
 ${prev.content}

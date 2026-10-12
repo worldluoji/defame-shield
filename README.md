@@ -135,7 +135,8 @@ dsh case set def-001 evidence 证据.json        # 数组或 {evidence:[...]} �
 dsh apply-fixes --case def-001
 #    → outputs/defense-patched.md
 
-# ⑥ 攻防推演: 模拟原被告多轮交锋, 输出风险走向与下一步建议。 dsh simulate --case qsz2 --mode ai 则使用ai模式，会出分
+# ⑥ 攻防推演: 模拟原被告多轮交锋, 输出风险走向与下一步建议。
+#    已登记证据 (case set evidence) 按"客观存在且经质证成立"假设参与评估 — 截图没在手也能先推演, 匹配对会逐条列出供你核对。 dsh simulate --case qsz2 --mode ai 则使用ai模式，会出分
 dsh simulate --case def-001
 
 # ⑦ 导出法院排版 PDF
@@ -226,6 +227,7 @@ dsh fill-defense <file> [--out]                     交互式填充 [待补充] 
 dsh simulate [defense] [选项]                       攻防推演 → 风险走向 (rule 定性档 / ai 概率估算, 均非预测)
   --case <id> 自动定位当前稿+拆解 JSON  --analysis <json>  显式覆盖
   --rounds <n>  --mode <rule|ai>  --out <json>
+  已登记证据 (case set evidence) 按"存在且经质证成立"假设评估: 覆盖反点补证建议则加分并列出匹配对, 未覆盖项进缺口清单
 dsh export-pdf <file> [--out|--case-number|--title] markdown → PDF (法院文书排版)
 ```
 

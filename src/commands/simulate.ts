@@ -73,6 +73,9 @@ export async function simulateCommand(defensePath: string | undefined, flags: Si
   }
 
   out.info(`推演: ${c.title}  /  轮数: ${flags.rounds ?? 3}  /  模式: ${mode}`);
+  if (c.evidence.length > 0) {
+    out.warn(`已登记 ${c.evidence.length} 项证据参与推演 — 仅文字描述未核验原件, 按"证据客观存在且经质证成立"假设评估 (截图到手后请复核)`);
+  }
 
   const result = await simulateBattle({
     case: c,
